@@ -1,0 +1,108 @@
+{
+  "project_name": "曾文溪景觀大橋",
+  "system_name": "BridgeMind AI",
+  "location": "台南曾文溪出海口",
+  "project_type": "Agentic AI + BIM 智慧橋梁設計系統",
+  "bridge_type_goal": "景觀大橋",
+  "river_width": "450~500公尺",
+  "bridge_length": "",
+  "bridge_width_m": 35.0,
+  "design_speed_kmh": 110.0,
+  "road_lanes": "雙向4車道",
+  "motorcycle_lane_width_m": 3.0,
+  "development_area_ha": 4.61,
+  "detention_volume_m3": 4090,
+  "soil_type": "粉土質砂層及砂質粉土層",
+  "foundation_method": "1.5~2.0公尺全套管場鑄樁",
+  "wetland": "曾文溪河口濕地生態敏感區",
+  "route_strategy": [
+    "銜接市道173線匝道",
+    "銜接防汛道路",
+    "銜接台江大道預留空間",
+    "零徵收",
+    "避開敏感濕地",
+    "避開臺南大學七股校區預定地"
+  ],
+  "environment_constraints": [
+    "濕地保護",
+    "黑面琵鷺棲地",
+    "河口生態",
+    "水質保護",
+    "施工噪音控制",
+    "施工振動控制"
+  ],
+  "engineering_constraints": [
+    "河寬約450至500公尺",
+    "需減少橋墩數量",
+    "需考量防洪",
+    "需考量耐震",
+    "需考量鹽害防蝕",
+    "需考量軟弱地盤"
+  ],
+  "construction_restrictions": [
+    "避開鳥類繁殖季",
+    "低衝擊施工",
+    "交通維持"
+  ],
+  "ecology_constraints": [
+    "黑面琵鷺棲地",
+    "河口濕地生物廊道"
+  ],
+  "water_quality_requirements": "施工與營運期水質保護",
+  "sustainability_direction": "LID、SDGs、減少生態衝擊",
+  "bridge_type_candidates": [
+    "斜張橋",
+    "拱橋",
+    "箱型梁橋",
+    "Extradosed Bridge",
+    "懸索橋"
+  ],
+  "design_keywords": [
+    "黑面琵鷺",
+    "濕地",
+    "台南",
+    "夕陽",
+    "水波",
+    "河口",
+    "海風",
+    "地標性"
+  ],
+  "cultural_imagery": "台南府城文化、河口夕照、濕地生態",
+  "possible_design_concepts": [
+    "黑面琵鷺展翅橋",
+    "曾文溪浪潮橋",
+    "府城夕照橋",
+    "低調生態橋"
+  ],
+  "night_lighting_required": true,
+  "bim_model_required": true,
+  "bim_required_elements": [
+    "橋面板",
+    "主梁",
+    "橋塔",
+    "斜拉索",
+    "橋墩",
+    "橋台",
+    "樁基礎",
+    "支承系統",
+    "伸縮縫",
+    "防落橋裝置",
+    "護欄",
+    "機車道",
+    "快車道",
+    "照明系統",
+    "排水系統",
+    "生態草溝",
+    "卵礫石淨化溝",
+    "景觀植栽",
+    "施工便橋"
+  ],
+  "ai_requirements": {
+    "use_rag": true,
+    "use_cnn": true,
+    "use_pinn": true,
+    "use_agentic_ai": true,
+    "use_digital_twin": true,
+    "use_generative_ai": true
+  }
+}

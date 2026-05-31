@@ -1,0 +1,1215 @@
+#!/usr/bin/env python3
+"""BridgeMind AI — Apple × Linear × Notion × Palantir 智慧橋梁決策平台"""
+
+from __future__ import annotations
+
+import json
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+import streamlit as st
+
+ROOT = Path(__file__).resolve().parent
+DATA = ROOT / "data"
+RAW = DATA / "raw_documents"
+INPUTS = DATA / "bridge_inputs"
+KB = DATA / "knowledge_base"
+OUT = ROOT / "outputs"
+EXPORTS = ROOT / "exports"
+PROFILE_PATH = INPUTS / "zengwen_bridge_profile.json"
+NOTES_PATH = KB / "zengwen_bridge_notes.md"
+
+PDF_CATS = {
+    "環評資料": RAW / "environmental_reports",
+    "可行性評估": RAW / "feasibility_reports",
+    "橋梁案例": RAW / "bridge_cases",
+    "法規資料": RAW / "regulations",
+}
+
+PAGES = [("project", "Project"), ("data", "Data"), ("analysis", "Analysis"), ("output", "Output")]
+
+PIPELINE = [
+    ("research", "research_summary.md"),
+    ("engineering", "engineering_analysis.md"),
+    ("environment", "environmental_sustainability.md"),
+    ("design", "design_bim_visualization.md"),
+    ("ai", "ai_integration_plan.md"),
+    ("cost", "cost_schedule_analysis.md"),
+    ("report", "final_report.md"),
+]
+
+PRIMARY = {
+    "00_bridgemind_recommendation.md": ("決策建議書", "BridgeMind 綜合決策建議"),
+    "01_executive_summary.md": ("主管摘要", "Executive Summary"),
+    "02_decision_dashboard.md": ("決策儀表板", "Decision Dashboard"),
+}
+
+TECH = {
+    "research_summary.md": "資料研究摘要",
+    "engineering_analysis.md": "工程分析",
+    "environmental_sustainability.md": "環境永續",
+    "design_bim_visualization.md": "設計與 BIM 規劃",
+    "ai_integration_plan.md": "AI 導入策略",
+    "cost_schedule_analysis.md": "經費與工期",
+    "final_report.md": "最終報告",
+    "ppt_outline.md": "簡報大綱",
+    "bim_parameters.json": "BIM 參數",
+}
+
+ALL_OUTPUTS = list(PRIMARY.keys()) + list(TECH.keys())
+
+CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
+html, body, [class*="css"] {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+.stApp { background: #050505; color: #F5F5F7; }
+.block-container { max-width: 920px; padding-top: 2.5rem; padding-bottom: 4rem; }
+[data-testid="stSidebar"] {
+  background: #0A0A0A;
+  border-right: 1px solid rgba(255,255,255,0.06);
+}
+[data-testid="stSidebar"] .block-container { padding-top: 2rem; max-width: 100%; }
+#MainMenu, footer, header { visibility: hidden; }
+
+.display { font-size: 3rem; font-weight: 600; letter-spacing: -0.03em; line-height: 1.1; color: #F5F5F7; margin: 0; }
+.display-sm { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.02em; color: #F5F5F7; margin: 0; }
+.subhead { font-size: 1.05rem; color: #A1A1AA; margin-top: 0.5rem; font-weight: 400; }
+.caption { font-size: 0.8rem; color: #71717A; letter-spacing: 0.02em; }
+
+.glass {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 24px;
+  padding: 1.75rem 2rem;
+  margin-bottom: 1rem;
+}
+.glass-sm {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 20px;
+  padding: 1.25rem 1.5rem;
+}
+.glass-hero {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 28px;
+  padding: 3rem 2.5rem;
+  text-align: center;
+  margin: 2rem 0;
+}
+
+.status-pill {
+  display: inline-block;
+  padding: 0.35rem 0.85rem;
+  border-radius: 100px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #A1A1AA;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.status-pill.ready { color: #30D158; border-color: rgba(48,209,88,0.3); background: rgba(48,209,88,0.08); }
+.status-pill.warn { color: #FFD60A; border-color: rgba(255,214,10,0.3); background: rgba(255,214,10,0.08); }
+
+.readiness-num {
+  font-size: 4rem;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  color: #F5F5F7;
+  line-height: 1;
+}
+.readiness-label { font-size: 0.8rem; color: #71717A; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.5rem; }
+
+.mini-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+.mini-cell {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 16px;
+  padding: 1rem 1.1rem;
+}
+.mini-cell .k { font-size: 0.7rem; color: #71717A; text-transform: uppercase; letter-spacing: 0.06em; }
+.mini-cell .v { font-size: 0.95rem; color: #F5F5F7; margin-top: 0.35rem; font-weight: 500; }
+
+.pipeline {
+  display: flex; flex-wrap: wrap; gap: 1.25rem; justify-content: flex-start;
+  padding: 1rem 0; opacity: 0.55;
+}
+.p-step { display: flex; align-items: center; gap: 0.45rem; font-size: 0.75rem; color: #71717A; }
+.dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid #52525B; background: transparent; }
+.dot.done { background: #30D158; border-color: #30D158; }
+
+.section-label { font-size: 0.7rem; color: #52525B; text-transform: uppercase; letter-spacing: 0.12em; margin: 2rem 0 1rem; }
+
+div.stButton > button[kind="primary"] {
+  background: #0071E3 !important;
+  color: #fff !important;
+  border: none !important;
+  border-radius: 980px !important;
+  padding: 0.65rem 1.75rem !important;
+  font-weight: 500 !important;
+  font-size: 0.95rem !important;
+  box-shadow: none !important;
+}
+div.stButton > button[kind="primary"]:hover { background: #0077ED !important; }
+div.stButton > button[kind="secondary"] {
+  background: rgba(255,255,255,0.06) !important;
+  color: #F5F5F7 !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  border-radius: 980px !important;
+}
+
+.stTextInput input, .stTextArea textarea, .stSelectbox > div > div {
+  background: rgba(255,255,255,0.04) !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  border-radius: 12px !important;
+  color: #F5F5F7 !important;
+}
+hr { border-color: rgba(255,255,255,0.06) !important; margin: 2rem 0 !important; }
+
+.nav-brand { font-size: 1rem; font-weight: 600; color: #F5F5F7; margin-bottom: 0.25rem; }
+.nav-sub { font-size: 0.7rem; color: #52525B; margin-bottom: 1.5rem; }
+.sbf { font-size: 0.65rem; color: #3F3F46; line-height: 1.7; margin-top: 2rem; }
+
+.package-title { font-size: 1rem; font-weight: 600; color: #F5F5F7; margin-bottom: 0.25rem; }
+.package-desc { font-size: 0.85rem; color: #71717A; margin-bottom: 1rem; }
+
+.card-preview { font-size: 0.9rem; color: #A1A1AA; line-height: 1.65; max-height: 200px; overflow: hidden; }
+</style>
+"""
+
+
+# ── Profile & I/O ─────────────────────────────────────────────────────────────
+def blank_profile(name: str = "", location: str = "", goal: str = "") -> dict[str, Any]:
+    return {
+        "project_name": name,
+        "system_name": "BridgeMind AI",
+        "location": location,
+        "project_type": "",
+        "bridge_type_goal": goal,
+        "river_width": "",
+        "bridge_length": "",
+        "bridge_width_m": "",
+        "design_speed_kmh": "",
+        "road_lanes": "",
+        "motorcycle_lane_width_m": "",
+        "development_area_ha": "",
+        "detention_volume_m3": "",
+        "soil_type": "",
+        "foundation_method": "",
+        "wetland": "",
+        "route_strategy": [],
+        "environment_constraints": [],
+        "engineering_constraints": [],
+        "bridge_type_candidates": [],
+        "design_keywords": [],
+        "possible_design_concepts": [],
+        "bim_required_elements": [],
+        "ai_requirements": {
+            "use_rag": False, "use_cnn": False, "use_pinn": False,
+            "use_agentic_ai": False, "use_digital_twin": False, "use_generative_ai": False,
+        },
+    }
+
+
+def ensure_dirs() -> None:
+    for d in [
+        RAW / "environmental_reports", RAW / "feasibility_reports",
+        RAW / "bridge_cases", RAW / "regulations",
+        INPUTS, KB, OUT,
+        EXPORTS / "word", EXPORTS / "ppt", EXPORTS / "images", EXPORTS / "bim",
+    ]:
+        d.mkdir(parents=True, exist_ok=True)
+    if not NOTES_PATH.exists():
+        NOTES_PATH.write_text("", encoding="utf-8")
+
+
+def project_exists() -> bool:
+    if not PROFILE_PATH.exists() or PROFILE_PATH.stat().st_size == 0:
+        return False
+    try:
+        with open(PROFILE_PATH, encoding="utf-8") as f:
+            return bool(str(json.load(f).get("project_name", "")).strip())
+    except (json.JSONDecodeError, OSError):
+        return False
+
+
+def load_profile() -> dict[str, Any] | None:
+    if not project_exists():
+        return None
+    with open(PROFILE_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_profile(data: dict[str, Any]) -> None:
+    INPUTS.mkdir(parents=True, exist_ok=True)
+    with open(PROFILE_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def create_project(name: str, location: str, goal: str) -> None:
+    save_profile(blank_profile(name.strip(), location.strip(), goal.strip()))
+
+
+def load_notes() -> str:
+    return NOTES_PATH.read_text(encoding="utf-8") if NOTES_PATH.exists() else ""
+
+
+def save_notes(text: str) -> None:
+    KB.mkdir(parents=True, exist_ok=True)
+    NOTES_PATH.write_text(text, encoding="utf-8")
+
+
+def write_out(name: str, content: str) -> None:
+    OUT.mkdir(parents=True, exist_ok=True)
+    (OUT / name).write_text(content, encoding="utf-8")
+
+
+def read_out(name: str) -> str | None:
+    p = OUT / name
+    return p.read_text(encoding="utf-8") if p.exists() and p.stat().st_size > 0 else None
+
+
+def read_json_out(name: str) -> dict | None:
+    p = OUT / name
+    if p.exists() and p.stat().st_size > 0:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+
+def out_exists(name: str) -> bool:
+    p = OUT / name
+    return p.exists() and p.stat().st_size > 0
+
+
+def has_primary_outputs() -> bool:
+    return out_exists("00_bridgemind_recommendation.md")
+
+
+def lines_to_list(t: str) -> list[str]:
+    return [ln.strip() for ln in t.splitlines() if ln.strip()]
+
+
+def list_to_lines(items: list | None) -> str:
+    return "\n".join(items or [])
+
+
+def fmt_size(n: int) -> str:
+    return f"{n/1024:.1f} KB" if n >= 1024 else f"{n} B"
+
+
+def list_pdfs() -> list[dict]:
+    rows = []
+    for cat, folder in PDF_CATS.items():
+        if not folder.exists():
+            continue
+        for f in sorted(folder.iterdir()):
+            if f.is_file() and not f.name.startswith("."):
+                rows.append({"name": f.name, "category": cat, "size": fmt_size(f.stat().st_size)})
+    return rows
+
+
+def pdfs_by_cat() -> dict[str, list[str]]:
+    r = {c: [] for c in PDF_CATS}
+    for row in list_pdfs():
+        r[row["category"]].append(row["name"])
+    return r
+
+
+def empty(v: Any) -> bool:
+    if v is None:
+        return True
+    if isinstance(v, str):
+        return not v.strip()
+    return len(v) == 0 if isinstance(v, (list, dict)) else False
+
+
+def _bl(items: list) -> str:
+    return "\n".join(f"- {x}" for x in items) if items else ""
+
+
+def missing_items(p: dict, notes: str, pdfs: dict[str, list[str]]) -> list[str]:
+    m = []
+    if not pdfs.get("環評資料"):
+        m.append("環評資料")
+    if not pdfs.get("可行性評估"):
+        m.append("可行性評估")
+    if not pdfs.get("橋梁案例"):
+        m.append("橋梁案例")
+    if not pdfs.get("法規資料"):
+        m.append("法規資料")
+    if empty(p.get("river_width")):
+        m.append("河寬與地形")
+    if empty(p.get("soil_type")) and empty(p.get("foundation_method")):
+        m.append("地質與基礎")
+    if empty(p.get("bridge_width_m")) and empty(p.get("bridge_length")):
+        m.append("橋梁尺度")
+    if empty(p.get("wetland")) and not p.get("environment_constraints"):
+        m.append("環境條件")
+    if len(notes.strip()) < 30:
+        m.append("知識筆記")
+    if not p.get("bridge_type_candidates") and not p.get("possible_design_concepts"):
+        m.append("橋型或設計方向")
+    return list(dict.fromkeys(m))
+
+
+def has_required_fields(p: dict) -> bool:
+    return all(not empty(p.get(k)) for k in ("project_name", "location", "bridge_type_goal"))
+
+
+def has_basic_engineering(p: dict) -> bool:
+    eng = ["river_width", "soil_type", "foundation_method", "bridge_width_m", "design_speed_kmh"]
+    return sum(1 for k in eng if not empty(p.get(k))) >= 3
+
+
+def has_environment_data(p: dict, notes: str, pdfs: dict) -> bool:
+    env_note = any(k in notes for k in ("環", "濕", "生態", "水質"))
+    return (not empty(p.get("wetland")) or bool(p.get("environment_constraints"))) and (
+        bool(pdfs.get("環評資料")) or env_note or len(notes.strip()) >= 50
+    )
+
+
+def has_design_data(p: dict) -> bool:
+    return bool(p.get("bridge_type_candidates")) and bool(p.get("design_keywords")) and bool(p.get("bim_required_elements"))
+
+
+def data_sufficient(p: dict, notes: str, pdfs: dict) -> bool:
+    return (
+        has_required_fields(p)
+        and has_basic_engineering(p)
+        and has_environment_data(p, notes, pdfs)
+        and has_design_data(p)
+        and (len(notes.strip()) >= 30 or sum(len(v) for v in pdfs.values()) >= 1)
+    )
+
+
+def project_readiness(p: dict, notes: str, pdfs: list) -> int:
+    if not has_required_fields(p):
+        return 0
+    score = 15
+    basics = ["river_width", "soil_type", "foundation_method", "bridge_width_m", "design_speed_kmh"]
+    score += int(35 * sum(1 for k in basics if not empty(p.get(k))) / len(basics))
+    if pdfs:
+        score += 15
+    if len(notes.strip()) >= 30:
+        score += 15
+    if has_design_data(p):
+        score += 20
+    if not data_sufficient(p, notes, pdfs_by_cat()):
+        return min(score, 40)
+    return min(score, 100)
+
+
+def project_status_label(p: dict, notes: str) -> str:
+    if not project_exists():
+        return "Not Ready"
+    if out_exists("final_report.md"):
+        return "Ready for Presentation"
+    if has_primary_outputs():
+        return "Ready for Design"
+    if data_sufficient(p, notes, pdfs_by_cat()):
+        return "Ready for Analysis"
+    if project_readiness(p, notes, list_pdfs()) > 0:
+        return "Data Needed"
+    return "Not Ready"
+
+
+def readiness_hint(p: dict, notes: str, pdfs: list) -> str:
+    st_label = project_status_label(p, notes)
+    if st_label == "Ready for Presentation":
+        return "可檢視成果並準備簡報。"
+    if st_label == "Ready for Design":
+        return "分析已完成，可進入設計與成果階段。"
+    if st_label == "Ready for Analysis":
+        return "資料已足夠，可啟動智慧分析。"
+    if project_readiness(p, notes, pdfs) > 0:
+        return "需要補充資料後才能進行可靠分析。"
+    return "請先建立專案並填寫基本資料。"
+
+
+def next_action_zh(p: dict, notes: str) -> str:
+    if out_exists("final_report.md"):
+        return "檢視簡報成果並匯出"
+    if has_primary_outputs():
+        return "檢視設計建議與決策摘要"
+    if data_sufficient(p, notes, pdfs_by_cat()):
+        return "啟動智慧分析"
+    pdfs = pdfs_by_cat()
+    if not pdfs.get("可行性評估") and not pdfs.get("環評資料"):
+        return "上傳可行性評估或環評資料"
+    if empty(p.get("river_width")) or empty(p.get("soil_type")):
+        return "補充工程與基地條件"
+    if len(notes.strip()) < 30:
+        return "撰寫知識筆記"
+    return "完善專案資料"
+
+
+def confidence_level(p: dict, notes: str) -> str:
+    if not data_sufficient(p, notes, pdfs_by_cat()):
+        return "Low"
+    r = project_readiness(p, notes, list_pdfs())
+    if r >= 70:
+        return "High"
+    if r >= 45:
+        return "Medium"
+    return "Low"
+
+
+def decision_stage(p: dict, notes: str) -> str:
+    if out_exists("final_report.md"):
+        return "Presentation Ready"
+    if has_primary_outputs():
+        return "Concept Design"
+    if data_sufficient(p, notes, pdfs_by_cat()):
+        return "Preliminary"
+    return "Not Ready" if project_readiness(p, notes, list_pdfs()) <= 15 else "Data Needed"
+
+
+def extract_section(md: str, heading: str) -> str:
+    pattern = rf"##\s*{re.escape(heading)}\s*\n(.*?)(?=\n##|\Z)"
+    m = re.search(pattern, md, re.DOTALL | re.IGNORECASE)
+    return m.group(1).strip() if m else ""
+
+
+def plain_preview(md: str, max_len: int = 380) -> str:
+    if not md:
+        return ""
+    text = re.sub(r"<!--.*?-->", "", md, flags=re.DOTALL)
+    text = re.sub(r"^#+\s*", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\*\*", "", text)
+    text = re.sub(r"\n+", " ", text).strip()
+    return text[:max_len] + ("…" if len(text) > max_len else "")
+
+
+def inject_css() -> None:
+    st.markdown(CSS, unsafe_allow_html=True)
+
+
+def glass(html: str) -> None:
+    st.markdown(f'<div class="glass">{html}</div>', unsafe_allow_html=True)
+
+
+def mini_cell(label: str, value: str) -> str:
+    v = value if value and value != "（未填寫）" else "尚未填寫"
+    return f'<div class="mini-cell"><div class="k">{label}</div><div class="v">{v}</div></div>'
+
+
+def pipeline_html(p: dict) -> str:
+    done_map = {
+        "research": out_exists("research_summary.md"),
+        "engineering": out_exists("engineering_analysis.md"),
+        "environment": out_exists("environmental_sustainability.md"),
+        "design": out_exists("design_bim_visualization.md"),
+        "ai": out_exists("ai_integration_plan.md"),
+        "cost": out_exists("cost_schedule_analysis.md"),
+        "report": out_exists("final_report.md"),
+    }
+    labels = ["Research", "Engineering", "Environment", "Design", "AI Strategy", "Cost", "Report"]
+    keys = ["research", "engineering", "environment", "design", "ai", "cost", "report"]
+    parts = []
+    for label, key in zip(labels, keys):
+        cls = "dot done" if done_map.get(key) else "dot"
+        parts.append(f'<div class="p-step"><span class="{cls}"></span>{label}</div>')
+    return f'<div class="pipeline">{"".join(parts)}</div>'
+
+
+# ── Generators (Apple-style outputs) ─────────────────────────────────────────
+def gen_recommendation(p: dict, notes: str, pdfs: dict, readiness: int) -> str:
+    missing = missing_items(p, notes, pdfs)
+    sufficient = data_sufficient(p, notes, pdfs)
+    concepts = p.get("possible_design_concepts", [])
+    rec = concepts[0] if sufficient and concepts else ""
+
+    status = f"資料完整度約 {readiness}%。已上傳 {sum(len(v) for v in pdfs.values())} 份文件。"
+    if sufficient:
+        rec_block = f"""## Recommendation
+
+建議優先評估：**{rec}**
+
+## Key Reasons
+
+- 符合專案目標：{p.get("bridge_type_goal", "")}
+- 已具備基本工程與環境資料
+- 可進入概念設計與 BIM 參數化階段
+
+## Main Risks
+
+{_bl(missing[:4]) if missing else "- 細部地質與發包風險仍需確認"}
+
+## Next Actions
+
+1. 確認推薦方案與團隊共識
+2. 建立 BIM 構件清單
+3. 準備簡報與決策材料
+"""
+    else:
+        rec_block = f"""## Recommendation
+
+目前資料不足，尚無法提出可靠橋型建議。
+
+## Key Reasons
+
+- 關鍵工程或環境資料尚未齊全
+- 缺少足夠參考文件或筆記
+
+## Main Risks
+
+- 過早定案可能導致決策偏差
+
+## Next Actions
+
+{_bl(missing[:7])}
+"""
+
+    return f"""# BridgeMind Recommendation
+
+## Current Status
+
+- 專案：{p.get("project_name")}
+- 位置：{p.get("location")}
+- {status}
+
+{rec_block}
+"""
+
+
+def gen_executive_summary(p: dict, notes: str, pdfs: dict, readiness: int) -> str:
+    missing = missing_items(p, notes, pdfs)
+    sufficient = data_sufficient(p, notes, pdfs)
+    return f"""# Executive Summary
+
+## Project
+
+{p.get("project_name")} · {p.get("location")} · {p.get("bridge_type_goal")}
+
+## Status
+
+{"資料已足夠進行初步分析。" if sufficient else "資料尚不足，建議先補充關鍵資料。"}
+
+## What We Know
+
+- 已填寫之工程與專案欄位
+- 上傳文件 {sum(len(v) for v in pdfs.values())} 份
+- 知識筆記 {len(notes.strip())} 字
+
+## What Is Missing
+
+{_bl(missing[:6]) if missing else "- 無重大缺項"}
+
+## Next Step
+
+{next_action_zh(p, notes)}
+"""
+
+
+def gen_decision_dashboard(p: dict, notes: str, readiness: int) -> str:
+    conf = confidence_level(p, notes)
+    stage = decision_stage(p, notes)
+    why = [
+        f"專案準備度 {readiness}%，目前處於 {stage} 階段。",
+        f"信心水準：{conf}。",
+        readiness_hint(p, notes, list_pdfs()),
+    ]
+    return f"""# Decision Dashboard
+
+## Project Readiness
+
+{readiness}% — {project_status_label(p, notes)}
+
+## Confidence
+
+{conf}
+
+## Decision Stage
+
+{stage}
+
+## Why
+
+{chr(10).join(why)}
+"""
+
+
+def gen_research(p: dict, notes: str, pdfs: dict) -> str:
+    missing = missing_items(p, notes, pdfs)
+    return f"""# 資料研究摘要
+
+## 摘要
+
+已盤點專案資料與 {sum(len(v) for v in pdfs.values())} 份文件。
+
+## 已有資料
+
+- 專案：{p.get("project_name")}
+- 河寬：{p.get("river_width") or "未填"}
+- 地層：{p.get("soil_type") or "未填"}
+
+## 缺少資料
+
+{_bl(missing) if missing else "無"}
+"""
+
+
+def gen_engineering(p: dict, notes: str, pdfs: dict) -> str:
+    if not has_basic_engineering(p):
+        return f"""# 工程可行性分析
+
+## 工程可行性摘要
+
+資料不足，尚無法確認工程可行性。
+
+## 下一步工程資料需求
+
+{_bl(missing_items(p, notes, pdfs)[:6])}
+"""
+    return f"""# 工程可行性分析
+
+## 工程可行性摘要
+
+依現有河寬、地層與基礎資料，可進行**初步**工程討論。
+
+## 重點
+
+- 河寬：{p.get("river_width")}
+- 地層：{p.get("soil_type")}
+- 基礎：{p.get("foundation_method") or "待填"}
+
+## 風險
+
+軟弱地盤、防洪、施工交通 — 需進一步驗證。
+"""
+
+
+def gen_environmental(p: dict, notes: str, pdfs: dict) -> str:
+    return f"""# 環境永續分析
+
+## 環境影響摘要
+
+濕地：{p.get("wetland") or "未填"}
+環境限制：{len(p.get("environment_constraints", []))} 項
+
+## 減輕對策
+
+低衝擊施工、水質防制、生態監測
+
+## 缺少資料
+
+{"環評文件" if not pdfs.get("環評資料") else "已部分具備"}
+"""
+
+
+def gen_design(p: dict, notes: str, pdfs: dict) -> tuple[str, dict]:
+    sufficient = data_sufficient(p, notes, pdfs)
+    missing = missing_items(p, notes, pdfs)
+    concepts = p.get("possible_design_concepts", [])
+    rec = concepts[0] if sufficient and concepts else ""
+
+    bim = {
+        "recommended_concept": rec or None,
+        "required_bim_components": p.get("bim_required_elements", []),
+        "bridge_width_m": p.get("bridge_width_m"),
+        "river_width": p.get("river_width"),
+        "status": "ready" if sufficient else "insufficient",
+    }
+
+    if not sufficient:
+        md = f"""# 設計與 BIM 規劃
+
+目前資料不足，尚無法可靠推薦橋型。
+
+請補充：河寬、橋長、地層、環評、交通需求與案例。
+
+{_bl(missing[:8])}
+"""
+        return md, bim
+
+    return f"""# 設計與 BIM 規劃
+
+## 推薦概念
+
+{rec}
+
+## BIM 構件
+
+{len(p.get("bim_required_elements", []))} 項已列出
+""", bim
+
+
+def gen_ai(p: dict) -> str:
+    ai = p.get("ai_requirements", {})
+    lines = []
+    if ai.get("use_rag"):
+        lines.append("- **文件檢索**：自動閱讀環評與法規重點")
+    if ai.get("use_agentic_ai"):
+        lines.append("- **多專業協作**：不同分析模組分工")
+    if ai.get("use_cnn"):
+        lines.append("- **影像辨識**：現場裂縫與施工監看")
+    if ai.get("use_pinn"):
+        lines.append("- **物理模擬**：加速結構與水文計算")
+    if ai.get("use_digital_twin"):
+        lines.append("- **數位孿生**：營運期監測維護")
+    if ai.get("use_generative_ai"):
+        lines.append("- **生成式設計**：橋型與視覺方案探索")
+    body = "\n".join(lines) if lines else "- 尚未啟用 AI 方向（可於 Data → 進階設定勾選）"
+    return f"""# AI 導入策略
+
+## 白話說明
+
+{body}
+"""
+
+
+def gen_cost(p: dict) -> str:
+    if empty(p.get("bridge_length")) and empty(p.get("bridge_width_m")):
+        return """# 經費與工期分析
+
+## 摘要
+
+缺少橋梁尺度與工法，尚無法估算。
+
+## 缺少
+
+橋長、橋型、工法、工期條件
+"""
+    return f"""# 經費與工期分析
+
+## 摘要
+
+可提出初步成本與工期**架構**，正式估算需設計深化。
+
+## 工期架構
+
+規劃 → 設計 → 施工 → 驗收
+"""
+
+
+def gen_final_report(p: dict, notes: str, pdfs: dict) -> tuple[str, str]:
+    rec = p.get("possible_design_concepts", [""])[0] if data_sufficient(p, notes, pdfs) else "（待資料補齊）"
+    final = f"""# {p.get("project_name")} — 最終報告
+
+## 專案背景
+
+{p.get("location")} · {p.get("bridge_type_goal")}
+
+## 工程可行性
+
+見工程分析章節。
+
+## 環境永續
+
+見環境分析章節。
+
+## 設計建議
+
+{rec}
+
+## 結論
+
+補齊資料後可進入概念設計與簡報階段。
+"""
+    ppt = f"""# 簡報大綱
+
+| # | 內容 |
+|---|------|
+| 1 | 封面 — {p.get("project_name")} |
+| 2 | 專案背景 |
+| 3 | 現況與挑戰 |
+| 4 | BridgeMind 方法 |
+| 5 | 資料與研究 |
+| 6 | 工程分析 |
+| 7 | 環境永續 |
+| 8 | 設計方向 |
+| 9 | BIM |
+| 10 | AI 導入 |
+| 11 | 經費工期 |
+| 12 | 推薦方案 |
+| 13 | 創新價值 |
+| 14 | 風險 |
+| 15 | 結論 |
+"""
+    return final, ppt
+
+
+def run_pipeline(p: dict, notes: str, cb: Callable | None = None) -> None:
+    pdfs = pdfs_by_cat()
+    readiness = project_readiness(p, notes, list_pdfs())
+
+    steps: list[tuple[str, Callable[[], None]]] = [
+        ("research", lambda: write_out("research_summary.md", gen_research(p, notes, pdfs))),
+        ("engineering", lambda: write_out("engineering_analysis.md", gen_engineering(p, notes, pdfs))),
+        ("environment", lambda: write_out("environmental_sustainability.md", gen_environmental(p, notes, pdfs))),
+        ("design", lambda: _run_design(p, notes, pdfs)),
+        ("ai", lambda: write_out("ai_integration_plan.md", gen_ai(p))),
+        ("cost", lambda: write_out("cost_schedule_analysis.md", gen_cost(p))),
+        ("report", lambda: _run_report(p, notes, pdfs)),
+    ]
+    for i, (key, fn) in enumerate(steps):
+        if cb:
+            cb(key, i, len(steps), "running")
+        fn()
+        if cb:
+            cb(key, i, len(steps), "done")
+
+    write_out("00_bridgemind_recommendation.md", gen_recommendation(p, notes, pdfs, readiness))
+    write_out("01_executive_summary.md", gen_executive_summary(p, notes, pdfs, readiness))
+    write_out("02_decision_dashboard.md", gen_decision_dashboard(p, notes, pdfs, readiness))
+
+
+def _run_design(p: dict, notes: str, pdfs: dict) -> None:
+    md, bim = gen_design(p, notes, pdfs)
+    write_out("design_bim_visualization.md", md)
+    write_out("bim_parameters.json", json.dumps(bim, ensure_ascii=False, indent=2))
+
+
+def _run_report(p: dict, notes: str, pdfs: dict) -> None:
+    f, ppt = gen_final_report(p, notes, pdfs)
+    write_out("final_report.md", f)
+    write_out("ppt_outline.md", ppt)
+
+
+# ── UI: Onboarding ───────────────────────────────────────────────────────────
+def page_onboarding() -> None:
+    st.markdown('<p class="display">BridgeMind AI</p>', unsafe_allow_html=True)
+    st.markdown('<p class="subhead">智慧橋梁決策平台</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="glass-hero">'
+        '<p class="display-sm" style="margin-bottom:0.75rem">尚未建立專案</p>'
+        '<p class="subhead" style="max-width:420px;margin:0 auto">'
+        "建立第一個橋梁專案，開始進行資料匯入、工程分析、BIM 規劃與決策輸出。"
+        "</p></div>",
+        unsafe_allow_html=True,
+    )
+    with st.form("create"):
+        st.markdown('<p class="section-label">新專案</p>', unsafe_allow_html=True)
+        name = st.text_input("專案名稱", placeholder="例如：河景觀橋")
+        loc = st.text_input("專案位置", placeholder="例如：縣市・河段")
+        goal = st.text_input("橋梁目標", placeholder="例如：景觀大橋")
+        if st.form_submit_button("建立專案", type="primary", use_container_width=True):
+            if not all([name.strip(), loc.strip(), goal.strip()]):
+                st.error("請填寫三個欄位")
+            else:
+                create_project(name, loc, goal)
+                st.rerun()
+
+
+# ── UI: Project ────────────────────────────────────────────────────────────────
+def page_project(p: dict) -> None:
+    notes = load_notes()
+    pdfs = list_pdfs()
+    readiness = project_readiness(p, notes, pdfs)
+    status = project_status_label(p, notes)
+    pill_cls = "ready" if status.startswith("Ready") else ("warn" if status == "Data Needed" else "")
+
+    st.markdown(f'<p class="display">{p.get("project_name")}</p>', unsafe_allow_html=True)
+    st.markdown(
+        f'<p class="subhead">{p.get("bridge_type_goal")} · {p.get("location")}</p>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(f'<span class="status-pill {pill_cls}">{status}</span>', unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    st.markdown(
+        f'<div class="glass"><div class="readiness-label">Project Readiness</div>'
+        f'<div class="readiness-num">{readiness}%</div>'
+        f'<p class="subhead" style="margin-top:1rem">{readiness_hint(p, notes, pdfs)}</p></div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f'<div class="glass-sm"><div class="readiness-label">下一步</div>'
+        f'<p style="font-size:1.15rem;color:#F5F5F7;font-weight:500;margin:0.5rem 0 0">'
+        f'{next_action_zh(p, notes)}</p></div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<p class="section-label">Snapshot</p>', unsafe_allow_html=True)
+    cells = [
+        mini_cell("位置", p.get("location", "")),
+        mini_cell("橋梁目標", p.get("bridge_type_goal", "")),
+        mini_cell("已上傳文件", f"{len(pdfs)} 份" if pdfs else "尚未填寫"),
+        mini_cell("知識筆記", f"{len(notes.strip())} 字" if notes.strip() else "尚未填寫"),
+        mini_cell("分析成果", "已完成" if has_primary_outputs() else "尚未填寫"),
+        mini_cell("BIM", "已就緒" if out_exists("bim_parameters.json") else "尚未填寫"),
+    ]
+    st.markdown(f'<div class="mini-grid">{"".join(cells)}</div>', unsafe_allow_html=True)
+
+    st.markdown(pipeline_html(p), unsafe_allow_html=True)
+
+
+# ── UI: Data ─────────────────────────────────────────────────────────────────
+def page_data(p: dict) -> None:
+    st.markdown('<p class="display-sm">Data</p>', unsafe_allow_html=True)
+    st.markdown('<p class="subhead">專案資料與來源</p>', unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    st.markdown('<p class="section-label">Project Basics</p>', unsafe_allow_html=True)
+    with st.form("basics"):
+        c1, c2 = st.columns(2)
+        pn = c1.text_input("專案名稱", p.get("project_name", ""))
+        loc = c2.text_input("專案位置", p.get("location", ""))
+        goal = c1.text_input("橋梁目標", p.get("bridge_type_goal", ""))
+        rw = c2.text_input("河寬", p.get("river_width", ""))
+        blen = c1.text_input("橋梁全長", p.get("bridge_length", ""))
+        bw = c2.text_input("橋面寬度", str(p.get("bridge_width_m") or ""))
+        spd = c1.text_input("設計速率", str(p.get("design_speed_kmh") or ""))
+        soil = c2.text_input("地層條件", p.get("soil_type", ""))
+        if st.form_submit_button("儲存專案資料", type="primary"):
+            p.update({
+                "project_name": pn, "location": loc, "bridge_type_goal": goal,
+                "river_width": rw, "bridge_length": blen, "bridge_width_m": bw,
+                "design_speed_kmh": spd, "soil_type": soil,
+            })
+            save_profile(p)
+            st.rerun()
+
+    st.markdown('<p class="section-label">Source Library</p>', unsafe_allow_html=True)
+    cat = st.selectbox("分類", list(PDF_CATS.keys()), label_visibility="collapsed")
+    files = st.file_uploader("上傳 PDF", type=["pdf"], accept_multiple_files=True, label_visibility="collapsed")
+    if st.button("上傳", type="secondary") and files:
+        folder = PDF_CATS[cat]
+        for f in files:
+            (folder / f.name).write_bytes(f.read())
+        st.rerun()
+    rows = list_pdfs()
+    if rows:
+        st.dataframe(rows, use_container_width=True, hide_index=True, column_config={
+            "name": "文件名稱", "category": "分類", "size": "大小",
+        })
+    else:
+        st.markdown('<p class="caption">尚未上傳文件。</p>', unsafe_allow_html=True)
+
+    st.markdown('<p class="section-label">Knowledge Notes</p>', unsafe_allow_html=True)
+    notes = load_notes()
+    text = st.text_area("筆記", notes, height=160, placeholder="貼上工程重點、競賽要求…", label_visibility="collapsed")
+    if not text.strip():
+        st.markdown('<p class="caption">尚未建立知識筆記。</p>', unsafe_allow_html=True)
+    if st.button("儲存筆記", type="secondary"):
+        save_notes(text)
+        st.rerun()
+
+    with st.expander("Advanced Details"):
+        with st.form("adv"):
+            found = st.text_input("基礎工法", p.get("foundation_method", ""))
+            route = st.text_area("路線策略", list_to_lines(p.get("route_strategy")))
+            eng = st.text_area("工程限制", list_to_lines(p.get("engineering_constraints")))
+            types = st.text_area("橋型候選", list_to_lines(p.get("bridge_type_candidates")))
+            wet = st.text_input("濕地條件", p.get("wetland", ""))
+            env = st.text_area("環境限制", list_to_lines(p.get("environment_constraints")))
+            kw = st.text_area("設計關鍵字", list_to_lines(p.get("design_keywords")))
+            concepts = st.text_area("橋梁概念", list_to_lines(p.get("possible_design_concepts")))
+            bim = st.text_area("BIM 構件", list_to_lines(p.get("bim_required_elements")))
+            ai = p.get("ai_requirements", {})
+            c1, c2, c3 = st.columns(3)
+            u = {
+                "use_rag": c1.checkbox("RAG", ai.get("use_rag", False)),
+                "use_cnn": c2.checkbox("CNN", ai.get("use_cnn", False)),
+                "use_pinn": c3.checkbox("PINN", ai.get("use_pinn", False)),
+                "use_agentic_ai": c1.checkbox("Agentic AI", ai.get("use_agentic_ai", False)),
+                "use_digital_twin": c2.checkbox("Digital Twin", ai.get("use_digital_twin", False)),
+                "use_generative_ai": c3.checkbox("Generative AI", ai.get("use_generative_ai", False)),
+            }
+            if st.form_submit_button("儲存進階設定"):
+                p.update({
+                    "foundation_method": found, "route_strategy": lines_to_list(route),
+                    "engineering_constraints": lines_to_list(eng),
+                    "bridge_type_candidates": lines_to_list(types),
+                    "wetland": wet, "environment_constraints": lines_to_list(env),
+                    "design_keywords": lines_to_list(kw),
+                    "possible_design_concepts": lines_to_list(concepts),
+                    "bim_required_elements": lines_to_list(bim),
+                    "ai_requirements": u,
+                })
+                save_profile(p)
+                st.rerun()
+
+
+# ── UI: Analysis ───────────────────────────────────────────────────────────────
+def page_analysis(p: dict) -> None:
+    st.markdown('<p class="display-sm">AI Analysis</p>', unsafe_allow_html=True)
+    st.markdown('<p class="subhead">將資料轉換為工程判斷、設計方向與決策建議</p>', unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    if st.button("啟動智慧分析", type="primary", use_container_width=True):
+        notes = load_notes()
+        prog = st.progress(0)
+        status = st.empty()
+        state = st.session_state.get("pipe", {})
+
+        def cb(key, idx, total, phase):
+            state[key] = phase
+            st.session_state.pipe = state
+            prog.progress((idx + (0.5 if phase == "running" else 1)) / total)
+
+        with st.spinner("分析中…"):
+            run_pipeline(p, notes, cb)
+        status.success("分析完成")
+        st.rerun()
+
+    st.markdown(pipeline_html(p), unsafe_allow_html=True)
+
+    if not has_primary_outputs():
+        st.markdown(
+            '<div class="glass-sm"><p class="subhead" style="margin:0">'
+            "尚未執行分析。請先輸入資料後啟動智慧分析。"
+            "</p></div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.markdown('<p class="section-label">Results</p>', unsafe_allow_html=True)
+
+    rec = read_out("00_bridgemind_recommendation.md")
+    if rec:
+        preview = plain_preview(extract_section(rec, "Recommendation") or extract_section(rec, "Current Status") or rec)
+        st.markdown(
+            f'<div class="glass"><p class="package-title">Decision Brief</p>'
+            f'<p class="card-preview">{preview}</p></div>',
+            unsafe_allow_html=True,
+        )
+        with st.expander("閱讀完整決策建議"):
+            st.markdown(rec)
+
+    exe = read_out("01_executive_summary.md")
+    if exe:
+        preview = plain_preview(extract_section(exe, "Next Step") or exe, 280)
+        st.markdown(
+            f'<div class="glass"><p class="package-title">Executive Summary</p>'
+            f'<p class="card-preview">{preview}</p></div>',
+            unsafe_allow_html=True,
+        )
+        with st.expander("閱讀完整主管摘要"):
+            st.markdown(exe)
+
+    with st.expander("Technical Reports"):
+        for fname, title in TECH.items():
+            if fname.endswith(".json"):
+                continue
+            c = read_out(fname)
+            if c:
+                st.markdown(f"**{title}**")
+                st.markdown(c[:3000] + ("…" if len(c) > 3000 else ""))
+
+
+# ── UI: Output ─────────────────────────────────────────────────────────────────
+def _download_btn(label: str, fname: str, col) -> None:
+    if out_exists(fname):
+        col.download_button(label, (OUT / fname).read_text(encoding="utf-8"), fname, key=f"dl_{fname}", use_container_width=True)
+
+
+def page_output(p: dict) -> None:
+    st.markdown('<p class="display-sm">Output</p>', unsafe_allow_html=True)
+    st.markdown('<p class="subhead">決策成果與交付物</p>', unsafe_allow_html=True)
+
+    if not has_primary_outputs():
+        st.markdown(
+            '<div class="glass"><p class="subhead" style="margin:0">'
+            "尚未產生成果。請先完成資料輸入並啟動分析。"
+            "</p></div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.markdown('<p class="section-label">Decision Package</p>', unsafe_allow_html=True)
+    for fname, (dl_label, card_title) in PRIMARY.items():
+        content = read_out(fname)
+        if content:
+            st.markdown(f'<div class="glass-sm"><p class="package-title">{card_title}</p></div>', unsafe_allow_html=True)
+            with st.expander(f"預覽 · {card_title}"):
+                st.markdown(content)
+    c1, c2, c3 = st.columns(3)
+    _download_btn("下載決策建議書", "00_bridgemind_recommendation.md", c1)
+    _download_btn("下載主管摘要", "01_executive_summary.md", c2)
+    _download_btn("下載決策儀表板", "02_decision_dashboard.md", c3)
+
+    st.markdown('<p class="section-label">Technical Package</p>', unsafe_allow_html=True)
+    tech_files = [k for k in TECH if not k.endswith(".json")]
+    c1, c2, c3 = st.columns(3)
+    for i, fname in enumerate(tech_files):
+        if out_exists(fname):
+            _download_btn(f"下載{TECH[fname]}", fname, [c1, c2, c3][i % 3])
+
+    st.markdown('<p class="section-label">BIM Package</p>', unsafe_allow_html=True)
+    if out_exists("bim_parameters.json"):
+        with st.expander("BIM 參數預覽"):
+            st.json(read_json_out("bim_parameters.json"))
+        st.download_button(
+            "下載 BIM 參數",
+            (OUT / "bim_parameters.json").read_text(encoding="utf-8"),
+            "bim_parameters.json",
+            key="dl_bim",
+        )
+    else:
+        st.markdown('<p class="caption">尚未產生 BIM 參數。</p>', unsafe_allow_html=True)
+
+    if out_exists("design_bim_visualization.md"):
+        with st.expander("設計與 BIM 規劃"):
+            st.markdown(read_out("design_bim_visualization.md"))
+
+    st.markdown('<p class="section-label">Presentation Package</p>', unsafe_allow_html=True)
+    p1, p2 = st.columns(2)
+    _download_btn("下載最終報告", "final_report.md", p1)
+    _download_btn("下載簡報大綱", "ppt_outline.md", p2)
+    if not out_exists("final_report.md") and not out_exists("ppt_outline.md"):
+        st.markdown('<p class="caption">尚未產生簡報成果。</p>', unsafe_allow_html=True)
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+    s1, s2 = st.columns(2)
+    if s1.button("清除分析成果", use_container_width=True):
+        for f in OUT.iterdir():
+            if f.is_file():
+                f.unlink()
+        st.session_state.pipe = {}
+        st.rerun()
+    if s2.button("重設專案", use_container_width=True):
+        if PROFILE_PATH.exists():
+            PROFILE_PATH.unlink()
+        st.rerun()
+
+
+# ── Main ───────────────────────────────────────────────────────────────────────
+def main() -> None:
+    st.set_page_config(page_title="BridgeMind AI", page_icon="◆", layout="wide", initial_sidebar_state="expanded")
+    inject_css()
+    ensure_dirs()
+
+    if "page" not in st.session_state:
+        st.session_state.page = "project"
+    if "pipe" not in st.session_state:
+        st.session_state.pipe = {}
+
+    with st.sidebar:
+        st.markdown('<p class="nav-brand">BridgeMind AI</p>', unsafe_allow_html=True)
+        st.markdown('<p class="nav-sub">智慧橋梁決策平台</p>', unsafe_allow_html=True)
+        for key, label in PAGES:
+            if st.button(label, key=f"nav_{key}", use_container_width=True):
+                st.session_state.page = key
+        st.markdown(
+            '<p class="sbf">Prototype v1.0<br>7-Agent Backend</p>',
+            unsafe_allow_html=True,
+        )
+
+    if not project_exists():
+        page_onboarding()
+        return
+
+    p = load_profile()
+    if p is None:
+        page_onboarding()
+        return
+
+    pages = {
+        "project": lambda: page_project(p),
+        "data": lambda: page_data(p),
+        "analysis": lambda: page_analysis(p),
+        "output": lambda: page_output(p),
+    }
+    pages[st.session_state.page]()
+
+
+if __name__ == "__main__":
+    main()
