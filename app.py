@@ -193,12 +193,151 @@ div.stButton > button[kind="secondary"] {
   border-radius: 980px !important;
 }
 
-.stTextInput input, .stTextArea textarea, .stSelectbox > div > div {
-  background: rgba(255,255,255,0.04) !important;
+/* ── Form controls (Windows / Streamlit Cloud / BaseWeb) ── */
+div[data-baseweb="input"] {
+  background-color: #111111 !important;
   border: 1px solid rgba(255,255,255,0.08) !important;
-  border-radius: 12px !important;
+  border-radius: 14px !important;
+}
+div[data-baseweb="input"] > div {
+  background-color: #111111 !important;
+  border-radius: 14px !important;
+}
+div[data-baseweb="input"] input {
+  background-color: #111111 !important;
+  color: #F5F5F7 !important;
+  caret-color: #F5F5F7 !important;
+  -webkit-text-fill-color: #F5F5F7 !important;
+}
+div[data-baseweb="input"] input::placeholder {
+  color: #8E8E93 !important;
+  opacity: 1 !important;
+  -webkit-text-fill-color: #8E8E93 !important;
+}
+
+textarea,
+.stTextArea textarea,
+[data-testid="stTextArea"] textarea {
+  background-color: #111111 !important;
+  color: #F5F5F7 !important;
+  caret-color: #F5F5F7 !important;
+  -webkit-text-fill-color: #F5F5F7 !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  border-radius: 14px !important;
+}
+textarea::placeholder,
+.stTextArea textarea::placeholder {
+  color: #8E8E93 !important;
+  opacity: 1 !important;
+}
+
+div[data-baseweb="select"] {
+  background-color: #111111 !important;
+  color: #F5F5F7 !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  border-radius: 14px !important;
+}
+div[data-baseweb="select"] > div {
+  background-color: #111111 !important;
+  border-radius: 14px !important;
+}
+div[data-baseweb="select"] * {
   color: #F5F5F7 !important;
 }
+div[data-baseweb="select"] svg {
+  fill: #A1A1AA !important;
+}
+
+div[data-baseweb="popover"] {
+  background-color: #111111 !important;
+  color: #F5F5F7 !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+}
+
+ul[role="listbox"] {
+  background-color: #111111 !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+}
+li[role="option"] {
+  background-color: #111111 !important;
+  color: #F5F5F7 !important;
+}
+li[role="option"]:hover,
+li[role="option"][aria-selected="true"] {
+  background-color: rgba(0,113,227,0.18) !important;
+  color: #FFFFFF !important;
+}
+
+div[data-baseweb="tag"] {
+  background-color: rgba(0,113,227,0.2) !important;
+  border: 1px solid rgba(0,113,227,0.35) !important;
+}
+div[data-baseweb="tag"] span {
+  color: #F5F5F7 !important;
+}
+
+section[data-testid="stFileUploader"] {
+  background-color: rgba(255,255,255,0.04) !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  border-radius: 18px !important;
+}
+section[data-testid="stFileUploader"] * {
+  color: #F5F5F7 !important;
+}
+
+.stTextInput input,
+.stNumberInput input,
+[data-testid="stNumberInput"] input,
+[data-testid="stTextInput"] input {
+  background-color: #111111 !important;
+  color: #F5F5F7 !important;
+  caret-color: #F5F5F7 !important;
+  -webkit-text-fill-color: #F5F5F7 !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  border-radius: 14px !important;
+}
+.stSelectbox > div > div,
+[data-testid="stSelectbox"] > div > div {
+  background-color: #111111 !important;
+  color: #F5F5F7 !important;
+  border: 1px solid rgba(255,255,255,0.08) !important;
+  border-radius: 14px !important;
+}
+
+[data-testid="stWidgetLabel"],
+label[data-testid="stWidgetLabel"] p,
+.stTextInput label,
+.stTextArea label,
+.stSelectbox label,
+.stNumberInput label {
+  color: #A1A1AA !important;
+}
+
+input:focus,
+textarea:focus,
+div[data-baseweb="input"]:focus-within,
+div[data-baseweb="select"]:focus-within {
+  outline: none !important;
+  border-color: #0071E3 !important;
+  box-shadow: 0 0 0 3px rgba(0,113,227,0.18) !important;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #111111 inset !important;
+  -webkit-text-fill-color: #F5F5F7 !important;
+  caret-color: #F5F5F7 !important;
+  transition: background-color 9999s ease-out 0s;
+}
+
+::selection {
+  background: rgba(0,113,227,0.35) !important;
+  color: #FFFFFF !important;
+}
+
 hr { border-color: rgba(255,255,255,0.06) !important; margin: 2rem 0 !important; }
 
 .nav-brand { font-size: 1rem; font-weight: 600; color: #F5F5F7; margin-bottom: 0.25rem; }
