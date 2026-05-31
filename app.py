@@ -102,11 +102,43 @@ html, body, [class*="css"] {
 .stApp { background: #050505; color: #F5F5F7; }
 .block-container { max-width: 920px; padding-top: 2.5rem; padding-bottom: 4rem; }
 [data-testid="stSidebar"] {
-  background: #0A0A0A;
-  border-right: 1px solid rgba(255,255,255,0.06);
+  background: #0A0A0A !important;
+  border-right: 1px solid rgba(255,255,255,0.08);
+  min-width: 16rem;
 }
-[data-testid="stSidebar"] .block-container { padding-top: 2rem; max-width: 100%; }
-#MainMenu, footer, header { visibility: hidden; }
+[data-testid="stSidebar"] .block-container {
+  padding-top: 2rem;
+  max-width: 100%;
+}
+[data-testid="stSidebar"] .nav-brand,
+[data-testid="stSidebar"] .nav-sub,
+[data-testid="stSidebar"] .sbf {
+  color: #F5F5F7;
+}
+[data-testid="stSidebar"] div.stButton > button {
+  background: rgba(255,255,255,0.06) !important;
+  color: #F5F5F7 !important;
+  border: 1px solid rgba(255,255,255,0.12) !important;
+  border-radius: 12px !important;
+}
+[data-testid="stSidebar"] div.stButton > button:hover {
+  background: rgba(255,255,255,0.1) !important;
+  border-color: rgba(255,255,255,0.2) !important;
+}
+/* 保留頂部工具列，否則 Mac 上側欄收合後無法再展開 */
+#MainMenu, footer { visibility: hidden; }
+[data-testid="stHeader"] {
+  background: rgba(5, 5, 5, 0.92) !important;
+  backdrop-filter: blur(10px);
+}
+[data-testid="stSidebarCollapsedControl"],
+button[kind="header"] {
+  color: #F5F5F7 !important;
+}
+.top-nav-wrap {
+  margin: 0 0 1.5rem;
+  padding: 0.35rem 0;
+}
 
 .display { font-size: 3rem; font-weight: 600; letter-spacing: -0.03em; line-height: 1.1; color: #F5F5F7; margin: 0; }
 .display-sm { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.02em; color: #F5F5F7; margin: 0; }
@@ -698,17 +730,61 @@ def get_data_overview() -> dict[str, Any]:
     }
 
 
+def _normalize_pdf_files(pdf_files: Any = None) -> list:
+    """確保 pdf_files 為 list（不接受未呼叫的 function 或 dict）。"""
+    if pdf_files is None:
+        return list_pdfs()
+    if callable(pdf_files):
+        pdf_files = pdf_files()
+    if isinstance(pdf_files, dict):
+        return list_pdfs()
+    if isinstance(pdf_files, list):
+        return pdf_files
+    return []
+
+
+def _normalize_source_links(source_links: Any = None) -> list:
+    """確保 source_links 為 list。"""
+    if source_links is None:
+        return load_source_links()
+    if callable(source_links):
+        source_links = source_links()
+    if isinstance(source_links, list):
+        return source_links
+    return []
+
+
 def calculate_data_completeness(
-    p: dict, notes: str, pdf_files: list, source_links: list
+    profile: dict | None = None,
+    notes: str = "",
+    pdf_files: Any = None,
+    source_links: Any = None,
 ) -> int:
     """profile 40% + notes 20% + PDF 20% + 網址 20%。"""
-    important = [
-        "project_name", "location", "bridge_type_goal",
-        "river_width", "soil_type", "bridge_width_m",
+    profile = profile or {}
+    notes = notes or ""
+    pdf_files = _normalize_pdf_files(pdf_files)
+    source_links = _normalize_source_links(source_links)
+
+    score = 0
+    important_fields = [
+        "project_name",
+        "location",
+        "bridge_type_goal",
+        "river_width",
+        "soil_type",
+        "foundation_method",
+        "bridge_width_m",
+        "design_speed_kmh",
     ]
-    filled = sum(1 for k in important if not empty(p.get(k)))
-    score = int(40 * filled / len(important))
-    if len(notes.strip()) >= 30:
+    filled = 0
+    for field in important_fields:
+        value = profile.get(field)
+        if value is not None and str(value).strip() != "":
+            filled += 1
+    if important_fields:
+        score += int((filled / len(important_fields)) * 40)
+    if notes and str(notes).strip():
         score += 20
     if len(pdf_files) > 0:
         score += 20
@@ -845,17 +921,16 @@ def data_sufficient(p: dict, notes: str, pdfs: dict) -> bool:
 
 
 def project_readiness(
-    p: dict,
-    notes: str,
-    pdfs: list | None = None,
-    source_links: list | None = None,
+    profile: dict | None = None,
+    notes: str = "",
+    pdf_files: Any = None,
+    source_links: Any = None,
 ) -> int:
-    pdf_files = pdfs if pdfs is not None else list_pdfs()
-    links = source_links if source_links is not None else load_source_links()
-    score = calculate_data_completeness(p, notes or "", pdf_files, links)
-    if has_design_data(p) and score >= 60:
-        score = min(score + 10, 100)
-    return min(int(score), 100)
+    profile = profile or {}
+    notes = notes or ""
+    pdf_files = _normalize_pdf_files(pdf_files)
+    source_links = _normalize_source_links(source_links)
+    return calculate_data_completeness(profile, notes, pdf_files, source_links)
 
 
 def project_status_label(p: dict, notes: str) -> str:
@@ -1087,8 +1162,8 @@ def get_missing_data(
 ) -> list[str]:
     profile = profile or {}
     notes = notes or ""
-    pdf_docs = pdfs if pdfs is not None else list_pdfs()
-    source_links = source_links if source_links is not None else load_source_links()
+    pdf_docs = _normalize_pdf_files(pdfs)
+    source_links = _normalize_source_links(source_links)
 
     missing: list[str] = []
     required_fields = {
@@ -1136,14 +1211,11 @@ def _prep_analysis(
     notes = safe_raw_str(notes)
     if isinstance(pdfs, dict):
         pdfs_cat: dict[str, list[str]] = pdfs
-        pdf_docs = list_pdfs()
-    elif isinstance(pdfs, list):
-        pdf_docs = pdfs
-        pdfs_cat = pdfs_by_cat()
+        pdf_docs = _normalize_pdf_files(None)
     else:
-        pdf_docs = list_pdfs()
+        pdf_docs = _normalize_pdf_files(pdfs)
         pdfs_cat = pdfs_by_cat()
-    source_links = source_links if source_links is not None else load_source_links()
+    source_links = _normalize_source_links(source_links)
     readiness_score = project_readiness(profile, notes, pdf_docs, source_links)
     confidence = get_confidence_level(readiness_score)
     missing = get_missing_data(profile, notes, pdf_docs, source_links)
@@ -1934,8 +2006,8 @@ def run_pipeline(
 ) -> None:
     profile = profile or {}
     notes = safe_raw_str(notes)
-    pdf_docs = list_pdfs() if pdfs is None else (list_pdfs() if isinstance(pdfs, dict) else pdfs)
-    source_links = source_links if source_links is not None else load_source_links()
+    pdf_docs = _normalize_pdf_files(pdfs)
+    source_links = _normalize_source_links(source_links)
     pdfs_cat = pdfs if isinstance(pdfs, dict) else pdfs_by_cat()
     readiness = int(project_readiness(profile, notes, pdf_docs, source_links))
 
@@ -2606,6 +2678,19 @@ def page_output(p: dict) -> None:
         st.rerun()
 
 
+def render_top_nav(current: str) -> None:
+    """主畫面備用導覽（Mac 側欄收合時仍可使用）。"""
+    st.markdown('<div class="top-nav-wrap">', unsafe_allow_html=True)
+    cols = st.columns(len(PAGES))
+    for col, (key, label) in zip(cols, PAGES):
+        with col:
+            btn_type = "primary" if current == key else "secondary"
+            if st.button(label, key=f"topnav_{key}", type=btn_type, use_container_width=True):
+                st.session_state.page = key
+                st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 def main() -> None:
     st.set_page_config(page_title="BridgeMind AI", page_icon="◆", layout="wide", initial_sidebar_state="expanded")
@@ -2636,6 +2721,8 @@ def main() -> None:
     if p is None:
         page_onboarding()
         return
+
+    render_top_nav(st.session_state.page)
 
     pages = {
         "project": lambda: page_project(p),
