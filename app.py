@@ -8,6 +8,7 @@ import html
 import json
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -23,13 +24,39 @@ OUT = ROOT / "outputs"
 EXPORTS = ROOT / "exports"
 PROFILE_PATH = INPUTS / "zengwen_bridge_profile.json"
 NOTES_PATH = KB / "zengwen_bridge_notes.md"
+SOURCE_LINKS_PATH = DATA / "source_links.json"
 
-PDF_CATS = {
-    "環評資料": RAW / "environmental_reports",
-    "可行性評估": RAW / "feasibility_reports",
-    "橋梁案例": RAW / "bridge_cases",
-    "法規資料": RAW / "regulations",
+SOURCE_CATEGORIES = [
+    "環評資料",
+    "可行性評估",
+    "橋梁案例",
+    "法規資料",
+    "工程資料",
+    "大地資料",
+    "水文排水資料",
+    "結構資料",
+    "BIM 資料",
+    "AI 技術資料",
+    "簡報與報告資料",
+    "其他資料",
+]
+
+CATEGORY_FOLDER_MAP = {
+    "環評資料": "environmental_reports",
+    "可行性評估": "feasibility_reports",
+    "橋梁案例": "bridge_cases",
+    "法規資料": "regulations",
+    "工程資料": "engineering",
+    "大地資料": "geotechnical",
+    "水文排水資料": "hydrology_drainage",
+    "結構資料": "structural",
+    "BIM 資料": "bim",
+    "AI 技術資料": "ai_technology",
+    "簡報與報告資料": "presentation_reports",
+    "其他資料": "others",
 }
+
+CORE_DATA_CATEGORIES = ("環評資料", "可行性評估", "橋梁案例", "法規資料")
 
 PAGES = [("project", "Project"), ("data", "Data"), ("analysis", "Analysis"), ("output", "Output")]
 
@@ -232,6 +259,28 @@ div[data-testid="stPopover"] > button {
   padding: 0.2rem 0.55rem !important;
   min-height: 2rem !important;
 }
+
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin: 1rem 0; }
+@media (max-width: 800px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+.kpi-card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 18px;
+  padding: 1.1rem 1.25rem;
+}
+.kpi-card .n { font-size: 1.75rem; font-weight: 600; color: #F5F5F7; letter-spacing: -0.02em; }
+.kpi-card .l { font-size: 0.68rem; color: #71717A; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 0.35rem; }
+.link-url { font-size: 0.78rem; color: #71717A; word-break: break-all; margin-top: 0.25rem; }
+.hub-tab-title { font-size: 1.1rem; font-weight: 600; color: #F5F5F7; margin: 0 0 0.35rem; }
+.hub-tab-desc { font-size: 0.88rem; color: #71717A; margin: 0 0 1.25rem; line-height: 1.5; }
+.warn-hint {
+  font-size: 0.85rem; color: #FFD60A;
+  background: rgba(255,214,10,0.06);
+  border: 1px solid rgba(255,214,10,0.15);
+  border-radius: 12px;
+  padding: 0.65rem 1rem;
+  margin: 0.35rem 0;
+}
 </style>
 """
 
@@ -269,16 +318,21 @@ def blank_profile(name: str = "", location: str = "", goal: str = "") -> dict[st
     }
 
 
-def ensure_dirs() -> None:
-    for d in [
-        RAW / "environmental_reports", RAW / "feasibility_reports",
-        RAW / "bridge_cases", RAW / "regulations",
-        INPUTS, KB, OUT,
-        EXPORTS / "word", EXPORTS / "ppt", EXPORTS / "images", EXPORTS / "bim",
-    ]:
+def ensure_directories() -> None:
+    """建立所有必要資料夾與預設檔案。"""
+    for folder_name in CATEGORY_FOLDER_MAP.values():
+        (RAW / folder_name).mkdir(parents=True, exist_ok=True)
+    for d in [INPUTS, KB, OUT, DATA, EXPORTS / "word", EXPORTS / "ppt", EXPORTS / "images", EXPORTS / "bim"]:
         d.mkdir(parents=True, exist_ok=True)
     if not NOTES_PATH.exists():
         NOTES_PATH.write_text("", encoding="utf-8")
+    if not SOURCE_LINKS_PATH.exists():
+        with open(SOURCE_LINKS_PATH, "w", encoding="utf-8") as f:
+            json.dump([], f, ensure_ascii=False, indent=2)
+
+
+def ensure_dirs() -> None:
+    ensure_directories()
 
 
 def project_exists() -> bool:
@@ -352,12 +406,9 @@ def list_to_lines(items: list | None) -> str:
     return "\n".join(items or [])
 
 
-DOCUMENT_FOLDERS = {
-    "environmental_reports": "環評資料",
-    "feasibility_reports": "可行性評估",
-    "bridge_cases": "橋梁案例",
-    "regulations": "法規資料",
-}
+def category_folder_path(category: str) -> Path:
+    folder_name = CATEGORY_FOLDER_MAP.get(category, "others")
+    return RAW / folder_name
 
 
 def format_file_size(size_bytes: int) -> str:
@@ -368,10 +419,26 @@ def format_file_size(size_bytes: int) -> str:
     return f"{size_bytes} B"
 
 
+def get_unique_filepath(folder_path: Path, filename: str) -> Path:
+    """避免同名覆蓋，必要時自動重新命名。"""
+    folder_path.mkdir(parents=True, exist_ok=True)
+    target = folder_path / filename
+    if not target.exists():
+        return target
+    stem = Path(filename).stem
+    suffix = Path(filename).suffix or ".pdf"
+    n = 1
+    while True:
+        candidate = folder_path / f"{stem}_{n}{suffix}"
+        if not candidate.exists():
+            return candidate
+        n += 1
+
+
 def get_uploaded_documents() -> list[dict]:
-    """掃描四個 raw_documents 子資料夾，回傳 PDF 文件清單。"""
+    """掃描所有分類資料夾，回傳 PDF 文件清單。"""
     docs: list[dict] = []
-    for folder_key, category in DOCUMENT_FOLDERS.items():
+    for category, folder_key in CATEGORY_FOLDER_MAP.items():
         folder_path = RAW / folder_key
         folder_path.mkdir(parents=True, exist_ok=True)
         try:
@@ -385,16 +452,130 @@ def get_uploaded_documents() -> list[dict]:
                 size_bytes = f.stat().st_size
             except OSError:
                 size_bytes = 0
-            resolved = str(f.resolve())
             docs.append({
                 "name": f.name,
                 "category": category,
                 "size_bytes": size_bytes,
                 "size_kb": round(size_bytes / 1024, 1) if size_bytes else 0,
                 "size_display": format_file_size(size_bytes),
-                "path": resolved,
+                "path": str(f.resolve()),
             })
-    return docs
+    return sorted(docs, key=lambda d: (d["category"], d["name"].lower()))
+
+
+def load_source_links() -> list[dict]:
+    if not SOURCE_LINKS_PATH.exists():
+        return []
+    try:
+        with open(SOURCE_LINKS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def save_source_links(links: list[dict]) -> None:
+    DATA.mkdir(parents=True, exist_ok=True)
+    with open(SOURCE_LINKS_PATH, "w", encoding="utf-8") as f:
+        json.dump(links, f, ensure_ascii=False, indent=2)
+
+
+def add_source_link(title: str, url: str, category: str, note: str) -> tuple[bool, str]:
+    title = title.strip()
+    url = url.strip()
+    note = note.strip()
+    if not title:
+        return False, "標題不可空白"
+    if not url:
+        return False, "URL 不可空白"
+    if not url.startswith(("http://", "https://")):
+        return False, "URL 必須以 http:// 或 https:// 開頭"
+    links = load_source_links()
+    links.append({
+        "id": str(uuid.uuid4()),
+        "title": title,
+        "url": url,
+        "category": category,
+        "note": note,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    save_source_links(links)
+    return True, "已儲存網址"
+
+
+def delete_source_link(link_id: str) -> tuple[bool, str]:
+    links = load_source_links()
+    new_links = [lnk for lnk in links if lnk.get("id") != link_id]
+    if len(new_links) == len(links):
+        return False, "找不到此網址資料"
+    save_source_links(new_links)
+    return True, "已刪除網址"
+
+
+def get_data_overview() -> dict[str, Any]:
+    docs = get_uploaded_documents()
+    links = load_source_links()
+    notes = load_notes()
+    notes_len = len(notes.strip())
+
+    pdf_by_cat = {c: 0 for c in SOURCE_CATEGORIES}
+    link_by_cat = {c: 0 for c in SOURCE_CATEGORIES}
+    for d in docs:
+        cat = d.get("category", "其他資料")
+        if cat in pdf_by_cat:
+            pdf_by_cat[cat] += 1
+    for lnk in links:
+        cat = lnk.get("category", "其他資料")
+        if cat in link_by_cat:
+            link_by_cat[cat] += 1
+
+    covered: set[str] = set()
+    for cat in SOURCE_CATEGORIES:
+        if pdf_by_cat.get(cat, 0) > 0 or link_by_cat.get(cat, 0) > 0:
+            covered.add(cat)
+
+    core_gaps: list[str] = []
+    gap_messages = {
+        "環評資料": "尚未加入環評資料。",
+        "可行性評估": "尚未加入可行性評估資料。",
+        "橋梁案例": "尚未加入橋梁案例。",
+        "法規資料": "尚未加入法規資料。",
+    }
+    for cat in CORE_DATA_CATEGORIES:
+        if pdf_by_cat.get(cat, 0) == 0 and link_by_cat.get(cat, 0) == 0:
+            core_gaps.append(gap_messages[cat])
+
+    return {
+        "pdf_count": len(docs),
+        "link_count": len(links),
+        "notes_length": notes_len,
+        "categories_covered": len(covered),
+        "pdf_by_cat": pdf_by_cat,
+        "link_by_cat": link_by_cat,
+        "core_gaps": core_gaps,
+        "has_notes": notes_len > 0,
+    }
+
+
+def calculate_data_completeness(
+    p: dict, notes: str, pdf_files: list, source_links: list
+) -> int:
+    """profile 40% + notes 20% + PDF 20% + 網址 20%。"""
+    if not has_required_fields(p):
+        return 0
+    important = [
+        "project_name", "location", "bridge_type_goal",
+        "river_width", "soil_type", "bridge_width_m",
+    ]
+    filled = sum(1 for k in important if not empty(p.get(k)))
+    score = int(40 * filled / len(important))
+    if len(notes.strip()) >= 30:
+        score += 20
+    if len(pdf_files) > 0:
+        score += 20
+    if len(source_links) > 0:
+        score += 20
+    return min(score, 100)
 
 
 def delete_document(file_path: str) -> tuple[bool, str]:
@@ -431,10 +612,27 @@ def list_pdfs() -> list[dict]:
 
 
 def pdfs_by_cat() -> dict[str, list[str]]:
-    r = {c: [] for c in PDF_CATS}
+    r = {c: [] for c in SOURCE_CATEGORIES}
     for row in get_uploaded_documents():
-        r[row["category"]].append(row["name"])
+        cat = row["category"]
+        if cat in r:
+            r[cat].append(row["name"])
     return r
+
+
+def links_by_cat() -> dict[str, list[dict]]:
+    r = {c: [] for c in SOURCE_CATEGORIES}
+    for lnk in load_source_links():
+        cat = lnk.get("category", "其他資料")
+        if cat in r:
+            r[cat].append(lnk)
+    return r
+
+
+def _category_has_data(cat: str, pdfs: dict[str, list[str]], links: list[dict]) -> bool:
+    if pdfs.get(cat):
+        return True
+    return any(lnk.get("category") == cat for lnk in links)
 
 
 def empty(v: Any) -> bool:
@@ -450,14 +648,15 @@ def _bl(items: list) -> str:
 
 
 def missing_items(p: dict, notes: str, pdfs: dict[str, list[str]]) -> list[str]:
+    links = load_source_links()
     m = []
-    if not pdfs.get("環評資料"):
+    if not _category_has_data("環評資料", pdfs, links):
         m.append("環評資料")
-    if not pdfs.get("可行性評估"):
+    if not _category_has_data("可行性評估", pdfs, links):
         m.append("可行性評估")
-    if not pdfs.get("橋梁案例"):
+    if not _category_has_data("橋梁案例", pdfs, links):
         m.append("橋梁案例")
-    if not pdfs.get("法規資料"):
+    if not _category_has_data("法規資料", pdfs, links):
         m.append("法規資料")
     if empty(p.get("river_width")):
         m.append("河寬與地形")
@@ -485,8 +684,10 @@ def has_basic_engineering(p: dict) -> bool:
 
 def has_environment_data(p: dict, notes: str, pdfs: dict) -> bool:
     env_note = any(k in notes for k in ("環", "濕", "生態", "水質"))
+    links = load_source_links()
+    has_env_source = _category_has_data("環評資料", pdfs, links)
     return (not empty(p.get("wetland")) or bool(p.get("environment_constraints"))) and (
-        bool(pdfs.get("環評資料")) or env_note or len(notes.strip()) >= 50
+        has_env_source or env_note or len(notes.strip()) >= 50
     )
 
 
@@ -505,20 +706,15 @@ def data_sufficient(p: dict, notes: str, pdfs: dict) -> bool:
 
 
 def project_readiness(p: dict, notes: str, pdfs: list) -> int:
-    if not has_required_fields(p):
+    links = load_source_links()
+    score = calculate_data_completeness(p, notes, pdfs, links)
+    if score == 0:
         return 0
-    score = 15
-    basics = ["river_width", "soil_type", "foundation_method", "bridge_width_m", "design_speed_kmh"]
-    score += int(35 * sum(1 for k in basics if not empty(p.get(k))) / len(basics))
-    if pdfs:
-        score += 15
-    if len(notes.strip()) >= 30:
-        score += 15
-    if has_design_data(p):
-        score += 20
+    if has_design_data(p) and score >= 60:
+        score = min(score + 10, 100)
     if not data_sufficient(p, notes, pdfs_by_cat()):
         return min(score, 40)
-    return min(score, 100)
+    return score
 
 
 def project_status_label(p: dict, notes: str) -> str:
@@ -553,11 +749,15 @@ def next_action_zh(p: dict, notes: str) -> str:
         return "檢視簡報成果並匯出"
     if has_primary_outputs():
         return "檢視設計建議與決策摘要"
+    overview = get_data_overview()
+    pdf_n = overview["pdf_count"]
+    link_n = overview["link_count"]
+    if pdf_n == 0 and link_n == 0:
+        return "請先至 Data Hub 新增 PDF 或網址資料來源"
+    if pdf_n > 0 and link_n == 0:
+        return "可補充政府公開資料或法規網址"
     if data_sufficient(p, notes, pdfs_by_cat()):
         return "啟動智慧分析"
-    pdfs = pdfs_by_cat()
-    if not pdfs.get("可行性評估") and not pdfs.get("環評資料"):
-        return "上傳可行性評估或環評資料"
     if empty(p.get("river_width")) or empty(p.get("soil_type")):
         return "補充工程與基地條件"
     if len(notes.strip()) < 30:
@@ -697,6 +897,7 @@ def gen_recommendation(p: dict, notes: str, pdfs: dict, readiness: int) -> str:
 def gen_executive_summary(p: dict, notes: str, pdfs: dict, readiness: int) -> str:
     missing = missing_items(p, notes, pdfs)
     sufficient = data_sufficient(p, notes, pdfs)
+    link_n = len(load_source_links())
     return f"""# Executive Summary
 
 ## Project
@@ -710,7 +911,8 @@ def gen_executive_summary(p: dict, notes: str, pdfs: dict, readiness: int) -> st
 ## What We Know
 
 - 已填寫之工程與專案欄位
-- 上傳文件 {sum(len(v) for v in pdfs.values())} 份
+- PDF 文件 {sum(len(v) for v in pdfs.values())} 份
+- 網址資料 {link_n} 筆
 - 知識筆記 {len(notes.strip())} 字
 
 ## What Is Missing
@@ -751,19 +953,60 @@ def gen_decision_dashboard(p: dict, notes: str, readiness: int) -> str:
 """
 
 
+def _md_table(headers: list[str], rows: list[list[str]]) -> str:
+    if not rows:
+        return ""
+    sep = "| " + " | ".join(headers) + " |"
+    line = "| " + " | ".join("---" for _ in headers) + " |"
+    body = "\n".join("| " + " | ".join(r) + " |" for r in rows)
+    return f"{sep}\n{line}\n{body}"
+
+
 def gen_research(p: dict, notes: str, pdfs: dict) -> str:
     missing = missing_items(p, notes, pdfs)
+    links = load_source_links()
+    docs = get_uploaded_documents()
+    notes_len = len(notes.strip())
+
+    if links:
+        link_rows = [
+            [lnk.get("title", ""), lnk.get("category", ""), lnk.get("url", ""), lnk.get("note", "") or "—"]
+            for lnk in links
+        ]
+        links_block = "## 網址資料來源\n\n" + _md_table(["標題", "分類", "URL", "備註"], link_rows)
+    else:
+        links_block = "## 網址資料來源\n\n目前尚未新增任何網址資料來源。"
+
+    if docs:
+        pdf_rows = [[d["name"], d["category"], d["size_display"]] for d in docs]
+        pdfs_block = "## PDF 文件來源\n\n" + _md_table(["文件名稱", "分類", "大小"], pdf_rows)
+    else:
+        pdfs_block = "## PDF 文件來源\n\n目前尚未上傳任何 PDF 文件。"
+
+    notes_status = "有內容" if notes_len > 0 else "尚無內容"
+    notes_block = f"""## 知識筆記狀態
+
+- 字數：{notes_len}
+- 是否有內容：{notes_status}
+"""
+
     return f"""# 資料研究摘要
 
 ## 摘要
 
-已盤點專案資料與 {sum(len(v) for v in pdfs.values())} 份文件。
+已盤點專案資料、{len(docs)} 份 PDF 與 {len(links)} 筆網址來源。
 
 ## 已有資料
 
 - 專案：{p.get("project_name")}
 - 河寬：{p.get("river_width") or "未填"}
 - 地層：{p.get("soil_type") or "未填"}
+
+{links_block}
+
+{pdfs_block}
+
+{notes_block}
 
 ## 缺少資料
 
@@ -1043,16 +1286,25 @@ def page_project(p: dict) -> None:
         unsafe_allow_html=True,
     )
 
-    st.markdown('<p class="section-label">Snapshot</p>', unsafe_allow_html=True)
+    ov = get_data_overview()
+    st.markdown('<p class="section-label">資料狀態</p>', unsafe_allow_html=True)
     cells = [
-        mini_cell("位置", p.get("location", "")),
-        mini_cell("橋梁目標", p.get("bridge_type_goal", "")),
-        mini_cell("已上傳文件", f"{len(pdfs)} 份" if pdfs else "尚未填寫"),
-        mini_cell("知識筆記", f"{len(notes.strip())} 字" if notes.strip() else "尚未填寫"),
+        mini_cell("PDF 文件", f"{ov['pdf_count']} 份"),
+        mini_cell("網址資料", f"{ov['link_count']} 筆"),
+        mini_cell("知識筆記", f"{ov['notes_length']} 字"),
+        mini_cell("已涵蓋分類", f"{ov['categories_covered']} / {len(SOURCE_CATEGORIES)}"),
+        mini_cell("資料完整度", f"{readiness}%"),
         mini_cell("分析成果", "已完成" if has_primary_outputs() else "尚未填寫"),
-        mini_cell("BIM", "已就緒" if out_exists("bim_parameters.json") else "尚未填寫"),
     ]
     st.markdown(f'<div class="mini-grid">{"".join(cells)}</div>', unsafe_allow_html=True)
+
+    st.markdown('<p class="section-label">Snapshot</p>', unsafe_allow_html=True)
+    snapshot_cells = [
+        mini_cell("位置", p.get("location", "")),
+        mini_cell("橋梁目標", p.get("bridge_type_goal", "")),
+        mini_cell("BIM", "已就緒" if out_exists("bim_parameters.json") else "尚未填寫"),
+    ]
+    st.markdown(f'<div class="mini-grid">{"".join(snapshot_cells)}</div>', unsafe_allow_html=True)
 
     st.markdown(pipeline_html(p), unsafe_allow_html=True)
 
@@ -1128,8 +1380,8 @@ def _render_doc_popover_actions(doc: dict, idx: int) -> None:
                     st.error(f"刪除失敗：{msg}")
 
 
-def render_source_library() -> None:
-    """Source Library：上傳 + 文件列表（含預覽、下載、刪除）。"""
+def render_pdf_document_list() -> None:
+    """PDF 文件清單（預覽、下載、刪除）。"""
     docs = get_uploaded_documents()
 
     st.markdown(
@@ -1141,7 +1393,7 @@ def render_source_library() -> None:
 
     if not docs:
         st.markdown(
-            '<div class="glass-sm"><p class="subhead" style="margin:0">尚未上傳任何文件。</p></div>',
+            '<div class="glass-sm"><p class="subhead" style="margin:0">尚未上傳任何 PDF 文件。</p></div>',
             unsafe_allow_html=True,
         )
         return
@@ -1164,11 +1416,210 @@ def render_source_library() -> None:
                 _render_doc_popover_actions(doc, idx)
 
 
+def _render_link_actions(link: dict) -> None:
+    lid = link.get("id", "")
+    sk = hashlib.md5(lid.encode("utf-8")).hexdigest()[:12]
+    pending_key = f"link_pending_delete_{sk}"
+    popover_fn = getattr(st, "popover", None)
+    container = popover_fn("⋯") if popover_fn else st.expander("⋯ 更多操作")
+    with container:
+        st.markdown('<p class="doc-action-label">更多操作</p>', unsafe_allow_html=True)
+        st.markdown(f"[開啟網址]({link.get('url', '')})")
+        if st.button("🗑️ 刪除網址", key=f"link_del_req_{sk}", use_container_width=True):
+            st.session_state[pending_key] = True
+        if st.session_state.get(pending_key):
+            st.markdown(
+                '<p class="doc-delete-warn">確定要刪除此網址嗎？<br>此操作無法復原。</p>',
+                unsafe_allow_html=True,
+            )
+            if st.button("確認刪除", key=f"link_del_confirm_{sk}", use_container_width=True):
+                ok, msg = delete_source_link(lid)
+                if ok:
+                    st.session_state.pop(pending_key, None)
+                    st.success(f"已刪除：{link.get('title', '')}")
+                    st.rerun()
+                else:
+                    st.error(f"刪除失敗：{msg}")
+
+
+def tab_pdf_documents() -> None:
+    st.markdown('<p class="hub-tab-title">PDF 文件庫</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="hub-tab-desc">上傳環評、可行性評估、橋梁案例與法規等 PDF 文件。</p>',
+        unsafe_allow_html=True,
+    )
+    cat = st.selectbox("分類", SOURCE_CATEGORIES, key="pdf_upload_category")
+    files = st.file_uploader(
+        "上傳 PDF 文件",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key="pdf_uploader",
+    )
+    if st.button("儲存 PDF 文件", type="primary", key="save_pdfs") and files:
+        folder = category_folder_path(cat)
+        saved = 0
+        for f in files:
+            dest = get_unique_filepath(folder, f.name)
+            dest.write_bytes(f.getvalue())
+            saved += 1
+        st.success(f"已儲存 {saved} 份 PDF 至「{cat}」")
+        st.rerun()
+
+    st.markdown('<p class="section-label" style="margin-top:1.5rem">文件清單</p>', unsafe_allow_html=True)
+    render_pdf_document_list()
+
+
+def tab_source_links() -> None:
+    st.markdown('<p class="hub-tab-title">網址資料庫</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="hub-tab-desc">新增政府資料、橋梁案例、法規、BIM 或 AI 技術相關網址。</p>',
+        unsafe_allow_html=True,
+    )
+    with st.form("add_link_form"):
+        title = st.text_input("資料標題", placeholder="例如：政府資料開放平臺 — 橋梁統計")
+        url = st.text_input("網址 URL", placeholder="https://...")
+        cat = st.selectbox("分類", SOURCE_CATEGORIES, key="link_form_category")
+        note = st.text_area("備註", height=80, placeholder="選填：資料用途或重點")
+        submitted = st.form_submit_button("儲存網址", type="primary")
+        if submitted:
+            ok, msg = add_source_link(title, url, cat, note)
+            if ok:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+
+    links = load_source_links()
+    st.markdown('<p class="section-label" style="margin-top:1.5rem">網址清單</p>', unsafe_allow_html=True)
+    if not links:
+        st.markdown(
+            '<div class="glass-sm"><p class="subhead" style="margin:0">尚未新增任何網址資料來源。</p></div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    for link in sorted(links, key=lambda x: x.get("created_at", ""), reverse=True):
+        safe_title = html.escape(link.get("title", ""))
+        safe_cat = html.escape(link.get("category", ""))
+        safe_note = html.escape(link.get("note", "") or "—")
+        safe_time = html.escape(link.get("created_at", ""))
+        safe_url = html.escape(link.get("url", ""))
+        with st.container(border=True):
+            c1, c2 = st.columns([6, 1])
+            with c1:
+                st.markdown(
+                    f'<div class="doc-name">{safe_title}</div>'
+                    f'<div class="doc-meta">{safe_cat} · {safe_time}</div>'
+                    f'<div class="link-url">{safe_url}</div>'
+                    f'<div class="doc-meta" style="margin-top:0.35rem">備註：{safe_note}</div>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown(f"[開啟網址]({link.get('url', '')})")
+            with c2:
+                _render_link_actions(link)
+
+
+def tab_knowledge_notes() -> None:
+    st.markdown('<p class="hub-tab-title">知識筆記</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="hub-tab-desc">貼上組員整理的工程資料、老師要求、橋梁設計內容或環評重點。</p>',
+        unsafe_allow_html=True,
+    )
+    notes = load_notes()
+    text = st.text_area(
+        "知識筆記內容",
+        notes,
+        height=350,
+        placeholder="貼上或輸入知識筆記…",
+        label_visibility="collapsed",
+        key="knowledge_notes_area",
+    )
+    char_count = len(text)
+    st.markdown(f'<p class="caption">目前字數：{char_count}</p>', unsafe_allow_html=True)
+    if not text.strip():
+        st.markdown('<p class="caption">目前尚未建立知識筆記。</p>', unsafe_allow_html=True)
+    if st.button("儲存知識筆記", type="primary", key="save_knowledge_notes"):
+        save_notes(text)
+        st.success("知識筆記已儲存")
+        st.rerun()
+    if text.strip():
+        st.markdown('<p class="section-label">Markdown 預覽</p>', unsafe_allow_html=True)
+        with st.container(border=True):
+            st.markdown(text)
+
+
+def tab_data_overview() -> None:
+    st.markdown('<p class="hub-tab-title">資料總覽</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="hub-tab-desc">檢視 PDF、網址與知識筆記的整體狀態與分類分布。</p>',
+        unsafe_allow_html=True,
+    )
+    ov = get_data_overview()
+    st.markdown(
+        f'<div class="kpi-grid">'
+        f'<div class="kpi-card"><div class="n">{ov["pdf_count"]}</div><div class="l">PDF 文件</div></div>'
+        f'<div class="kpi-card"><div class="n">{ov["link_count"]}</div><div class="l">網址資料</div></div>'
+        f'<div class="kpi-card"><div class="n">{ov["notes_length"]}</div><div class="l">筆記字數</div></div>'
+        f'<div class="kpi-card"><div class="n">{ov["categories_covered"]}</div><div class="l">已涵蓋分類</div></div>'
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<p class="section-label">分類統計</p>', unsafe_allow_html=True)
+    rows = []
+    for cat in SOURCE_CATEGORIES:
+        pdf_n = ov["pdf_by_cat"].get(cat, 0)
+        link_n = ov["link_by_cat"].get(cat, 0)
+        if pdf_n > 0 or link_n > 0:
+            rows.append({"分類": cat, "PDF": pdf_n, "網址": link_n})
+    if rows:
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+    else:
+        st.markdown('<p class="caption">尚無任何分類資料。</p>', unsafe_allow_html=True)
+
+    if ov["core_gaps"]:
+        st.markdown('<p class="section-label">資料完整度提示</p>', unsafe_allow_html=True)
+        for hint in ov["core_gaps"]:
+            st.markdown(f'<div class="warn-hint">{html.escape(hint)}</div>', unsafe_allow_html=True)
+
+    completeness = calculate_data_completeness(
+        load_profile() or {},
+        load_notes(),
+        list_pdfs(),
+        load_source_links(),
+    )
+    st.markdown(
+        f'<div class="glass-sm" style="margin-top:1rem">'
+        f'<p class="caption" style="margin:0">資料完整度（profile / 筆記 / PDF / 網址）</p>'
+        f'<p style="font-size:1.5rem;font-weight:600;color:#F5F5F7;margin:0.35rem 0 0">{completeness}%</p>'
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+
 # ── UI: Data ─────────────────────────────────────────────────────────────────
 def page_data(p: dict) -> None:
-    st.markdown('<p class="display-sm">Data</p>', unsafe_allow_html=True)
-    st.markdown('<p class="subhead">專案資料與來源</p>', unsafe_allow_html=True)
+    st.markdown('<p class="display-sm">Data Hub</p>', unsafe_allow_html=True)
+    st.markdown('<p class="subhead">資料中心</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<p class="caption" style="margin-top:0.5rem">'
+        "集中管理 PDF 文件、網址資料與知識筆記，作為 BridgeMind AI 分析基礎。"
+        "</p>",
+        unsafe_allow_html=True,
+    )
     st.markdown("<br>", unsafe_allow_html=True)
+
+    tab_pdf, tab_url, tab_notes, tab_overview = st.tabs(
+        ["PDF 文件", "網址資料", "知識筆記", "資料總覽"]
+    )
+    with tab_pdf:
+        tab_pdf_documents()
+    with tab_url:
+        tab_source_links()
+    with tab_notes:
+        tab_knowledge_notes()
+    with tab_overview:
+        tab_data_overview()
 
     st.markdown('<p class="section-label">Project Basics</p>', unsafe_allow_html=True)
     with st.form("basics"):
@@ -1189,28 +1640,6 @@ def page_data(p: dict) -> None:
             })
             save_profile(p)
             st.rerun()
-
-    st.markdown('<p class="section-label">Source Library</p>', unsafe_allow_html=True)
-    cat = st.selectbox("分類", list(PDF_CATS.keys()), label_visibility="collapsed")
-    files = st.file_uploader("上傳 PDF", type=["pdf"], accept_multiple_files=True, label_visibility="collapsed")
-    if st.button("上傳", type="secondary") and files:
-        folder = PDF_CATS[cat]
-        folder.mkdir(parents=True, exist_ok=True)
-        for f in files:
-            (folder / f.name).write_bytes(f.read())
-        st.rerun()
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    render_source_library()
-
-    st.markdown('<p class="section-label">Knowledge Notes</p>', unsafe_allow_html=True)
-    notes = load_notes()
-    text = st.text_area("筆記", notes, height=160, placeholder="貼上工程重點、競賽要求…", label_visibility="collapsed")
-    if not text.strip():
-        st.markdown('<p class="caption">尚未建立知識筆記。</p>', unsafe_allow_html=True)
-    if st.button("儲存筆記", type="secondary"):
-        save_notes(text)
-        st.rerun()
 
     with st.expander("Advanced Details"):
         with st.form("adv"):
@@ -1328,7 +1757,7 @@ def page_output(p: dict) -> None:
     if not has_primary_outputs():
         st.markdown(
             '<div class="glass"><p class="subhead" style="margin:0">'
-            "尚未產生成果。請先完成資料輸入並啟動分析。"
+            "尚未產生成果，請先至 Analysis 啟動智慧分析。"
             "</p></div>",
             unsafe_allow_html=True,
         )
