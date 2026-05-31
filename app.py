@@ -730,28 +730,87 @@ def get_data_overview() -> dict[str, Any]:
     }
 
 
-def _normalize_pdf_files(pdf_files: Any = None) -> list:
-    """確保 pdf_files 為 list（不接受未呼叫的 function 或 dict）。"""
-    if pdf_files is None:
-        return list_pdfs()
-    if callable(pdf_files):
-        pdf_files = pdf_files()
-    if isinstance(pdf_files, dict):
-        return list_pdfs()
-    if isinstance(pdf_files, list):
-        return pdf_files
-    return []
+def _normalize_pdf_files(pdf_files: Any = None) -> list[dict]:
+    """
+    Normalize PDF input into a list of document dictionaries.
+    Accepts: None, list[dict], list[str], callable returning list, invalid value.
+    """
+    try:
+        if callable(pdf_files):
+            try:
+                pdf_files = pdf_files()
+            except TypeError:
+                pdf_files = []
+            except Exception:
+                pdf_files = []
+
+        if pdf_files is None:
+            return []
+
+        if isinstance(pdf_files, dict):
+            return [{
+                "name": pdf_files.get("name") or pdf_files.get("filename") or "未命名文件",
+                "category": pdf_files.get("category") or "未分類",
+                "path": pdf_files.get("path") or "",
+                "size_display": pdf_files.get("size_display") or pdf_files.get("size") or "未知",
+            }]
+
+        if isinstance(pdf_files, str):
+            return [{
+                "name": pdf_files,
+                "category": "未分類",
+                "path": pdf_files,
+                "size_display": "未知",
+            }]
+
+        if not isinstance(pdf_files, list):
+            return []
+
+        normalized: list[dict] = []
+        for item in pdf_files:
+            if item is None:
+                continue
+            if isinstance(item, dict):
+                normalized.append({
+                    "name": item.get("name") or item.get("filename") or "未命名文件",
+                    "category": item.get("category") or "未分類",
+                    "path": item.get("path") or "",
+                    "size_display": item.get("size_display") or item.get("size") or "未知",
+                })
+            elif isinstance(item, str):
+                normalized.append({
+                    "name": item,
+                    "category": "未分類",
+                    "path": item,
+                    "size_display": "未知",
+                })
+            else:
+                normalized.append({
+                    "name": str(item),
+                    "category": "未分類",
+                    "path": "",
+                    "size_display": "未知",
+                })
+        return normalized
+    except Exception:
+        return []
 
 
 def _normalize_source_links(source_links: Any = None) -> list:
-    """確保 source_links 為 list。"""
-    if source_links is None:
-        return load_source_links()
-    if callable(source_links):
-        source_links = source_links()
-    if isinstance(source_links, list):
-        return source_links
-    return []
+    """確保 source_links 為 list（安全處理 callable）。"""
+    try:
+        if callable(source_links):
+            try:
+                source_links = source_links()
+            except (TypeError, Exception):
+                source_links = []
+        if source_links is None:
+            return load_source_links()
+        if isinstance(source_links, list):
+            return source_links
+        return []
+    except Exception:
+        return []
 
 
 def calculate_data_completeness(
@@ -1211,9 +1270,11 @@ def _prep_analysis(
     notes = safe_raw_str(notes)
     if isinstance(pdfs, dict):
         pdfs_cat: dict[str, list[str]] = pdfs
-        pdf_docs = _normalize_pdf_files(None)
+        pdf_docs = get_uploaded_documents()
     else:
         pdf_docs = _normalize_pdf_files(pdfs)
+        if not pdf_docs:
+            pdf_docs = get_uploaded_documents()
         pdfs_cat = pdfs_by_cat()
     source_links = _normalize_source_links(source_links)
     readiness_score = project_readiness(profile, notes, pdf_docs, source_links)
@@ -1999,16 +2060,36 @@ def _safe_run_report(
 
 def run_pipeline(
     profile: dict | None = None,
-    notes: str | None = None,
+    notes: str = "",
     pdfs: Any = None,
-    source_links: list | None = None,
-    cb: Callable | None = None,
+    source_links: Any = None,
+    progress_callback: Callable | None = None,
 ) -> None:
     profile = profile or {}
-    notes = safe_raw_str(notes)
-    pdf_docs = _normalize_pdf_files(pdfs)
-    source_links = _normalize_source_links(source_links)
+    notes = notes or ""
+
     pdfs_cat = pdfs if isinstance(pdfs, dict) else pdfs_by_cat()
+
+    if callable(pdfs):
+        try:
+            pdfs = pdfs()
+        except Exception:
+            pdfs = []
+
+    if callable(source_links):
+        try:
+            source_links = source_links()
+        except Exception:
+            source_links = []
+
+    pdf_docs = _normalize_pdf_files(pdfs)
+    if not pdf_docs:
+        pdf_docs = get_uploaded_documents()
+
+    source_links = source_links if isinstance(source_links, list) else []
+    if not source_links:
+        source_links = load_source_links()
+
     readiness = int(project_readiness(profile, notes, pdf_docs, source_links))
 
     steps: list[tuple[str, Callable[[], Any]]] = [
@@ -2032,14 +2113,14 @@ def run_pipeline(
     ]
 
     for i, (key, fn) in enumerate(steps):
-        if cb:
-            cb(key, i, len(steps), "running")
+        if progress_callback:
+            progress_callback(key, i, len(steps), "running")
         try:
             fn()
         except Exception:
             pass
-        if cb:
-            cb(key, i, len(steps), "done")
+        if progress_callback:
+            progress_callback(key, i, len(steps), "done")
 
     for fname, gen_fn in [
         ("00_bridgemind_recommendation.md", gen_recommendation),
@@ -2544,7 +2625,15 @@ def page_analysis(p: dict) -> None:
             prog.progress((idx + (0.5 if phase == "running" else 1)) / total)
 
         with st.spinner("分析中…"):
-            run_pipeline(p, notes, cb)
+            pdf_docs = get_uploaded_documents()
+            source_links = load_source_links()
+            run_pipeline(
+                p,
+                notes,
+                pdf_docs,
+                source_links,
+                progress_callback=cb,
+            )
         pdf_docs = list_pdfs()
         links = load_source_links()
         conf = get_confidence_level(project_readiness(p, notes, pdf_docs, links))
