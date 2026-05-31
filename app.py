@@ -90,6 +90,8 @@ TECH = {
 
 ALL_OUTPUTS = list(PRIMARY.keys()) + list(TECH.keys())
 
+# Analysis Engine v2.0：Type-Safe Layer 與 gen_* 實作見本檔「Analysis Engine v2.0」區段。
+
 CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
@@ -700,8 +702,6 @@ def calculate_data_completeness(
     p: dict, notes: str, pdf_files: list, source_links: list
 ) -> int:
     """profile 40% + notes 20% + PDF 20% + 網址 20%。"""
-    if not has_required_fields(p):
-        return 0
     important = [
         "project_name", "location", "bridge_type_goal",
         "river_width", "soil_type", "bridge_width_m",
@@ -844,16 +844,18 @@ def data_sufficient(p: dict, notes: str, pdfs: dict) -> bool:
     )
 
 
-def project_readiness(p: dict, notes: str, pdfs: list) -> int:
-    links = load_source_links()
-    score = calculate_data_completeness(p, notes, pdfs, links)
-    if score == 0:
-        return 0
+def project_readiness(
+    p: dict,
+    notes: str,
+    pdfs: list | None = None,
+    source_links: list | None = None,
+) -> int:
+    pdf_files = pdfs if pdfs is not None else list_pdfs()
+    links = source_links if source_links is not None else load_source_links()
+    score = calculate_data_completeness(p, notes or "", pdf_files, links)
     if has_design_data(p) and score >= 60:
         score = min(score + 10, 100)
-    if not data_sufficient(p, notes, pdfs_by_cat()):
-        return min(score, 40)
-    return score
+    return min(int(score), 100)
 
 
 def project_status_label(p: dict, notes: str) -> str:
@@ -905,14 +907,8 @@ def next_action_zh(p: dict, notes: str) -> str:
 
 
 def confidence_level(p: dict, notes: str) -> str:
-    if not data_sufficient(p, notes, pdfs_by_cat()):
-        return "Low"
-    r = project_readiness(p, notes, list_pdfs())
-    if r >= 70:
-        return "High"
-    if r >= 45:
-        return "Medium"
-    return "Low"
+    r = project_readiness(p, notes, list_pdfs(), load_source_links())
+    return get_confidence_level(r)["level_en"]
 
 
 def decision_stage(p: dict, notes: str) -> str:
@@ -973,90 +969,413 @@ def pipeline_html(p: dict) -> str:
     return f'<div class="pipeline">{"".join(parts)}</div>'
 
 
-# ── Generators (Apple-style outputs) ─────────────────────────────────────────
-def gen_recommendation(p: dict, notes: str, pdfs: dict, readiness: int) -> str:
-    missing = missing_items(p, notes, pdfs)
-    sufficient = data_sufficient(p, notes, pdfs)
-    concepts = p.get("possible_design_concepts", [])
-    rec = concepts[0] if sufficient and concepts else ""
+# ══════════════════════════════════════════════════════════════════════════════
+# BridgeMind AI — Analysis Engine v2.0 (Type-Safe + Confidence-Aware)
+# ══════════════════════════════════════════════════════════════════════════════
+def safe_str(value: Any, default: str = "尚未提供") -> str:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        value = value.strip()
+        return value if value else default
+    return str(value)
 
-    status = f"資料完整度約 {readiness}%。已上傳 {sum(len(v) for v in pdfs.values())} 份文件。"
-    if sufficient:
+
+def safe_raw_str(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return str(value)
+
+
+def safe_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if isinstance(value, tuple):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if isinstance(value, str):
+        return [v.strip() for v in value.splitlines() if v.strip()]
+    value = str(value).strip()
+    return [value] if value else []
+
+
+def safe_join(value: Any, default: str = "尚未提供") -> str:
+    items = safe_list(value)
+    if not items:
+        return default
+    return "、".join(items)
+
+
+def safe_len(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, (list, tuple, dict, str)):
+        return len(value)
+    return 0
+
+
+def safe_number(value: Any, default: float = 0) -> float:
+    try:
+        if value is None:
+            return default
+        if isinstance(value, str):
+            value = value.strip().replace(",", "")
+            if value == "":
+                return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def has_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, dict)):
+        return len(value) > 0
+    return True
+
+
+def md_table(headers: list[str], rows: list[list[Any]]) -> str:
+    if not rows:
+        return "目前尚無資料。"
+    header_line = "| " + " | ".join(headers) + " |"
+    sep_line = "| " + " | ".join(["---"] * len(headers)) + " |"
+    row_lines = []
+    for row in rows:
+        safe_row = [safe_str(cell) for cell in row]
+        row_lines.append("| " + " | ".join(safe_row) + " |")
+    return "\n".join([header_line, sep_line] + row_lines)
+
+
+def get_confidence_level(readiness_score: Any) -> dict[str, str]:
+    score = safe_number(readiness_score, 0)
+    if score < 40:
+        return {
+            "level": "低可信度",
+            "level_en": "Low",
+            "stage": "初步判斷",
+            "decision_stage": "Data Needed",
+            "description": "目前資料不足，分析結果僅能作為方向性參考，不宜作為最終設計決策。",
+        }
+    if score < 75:
+        return {
+            "level": "中可信度",
+            "level_en": "Medium",
+            "stage": "可討論建議",
+            "decision_stage": "Preliminary Analysis",
+            "description": "目前已有部分工程與環境資料，可提出初步方案，但仍需補充環評、可行性評估、地質或案例資料。",
+        }
+    return {
+        "level": "高可信度",
+        "level_en": "High",
+        "stage": "較可靠決策",
+        "decision_stage": "Concept Design Ready",
+        "description": "目前資料相對完整，可作為概念設計與簡報決策依據，但仍需專業工程師複核。",
+    }
+
+
+def get_missing_data(
+    profile: dict | None,
+    notes: str = "",
+    pdfs: list | None = None,
+    source_links: list | None = None,
+) -> list[str]:
+    profile = profile or {}
+    notes = notes or ""
+    pdf_docs = pdfs if pdfs is not None else list_pdfs()
+    source_links = source_links if source_links is not None else load_source_links()
+
+    missing: list[str] = []
+    required_fields = {
+        "project_name": "專案名稱",
+        "location": "位置",
+        "bridge_type_goal": "橋梁目標",
+        "river_width": "河寬",
+        "bridge_length": "橋長",
+        "bridge_width_m": "橋寬",
+        "design_speed_kmh": "設計速率",
+        "soil_type": "地層",
+        "foundation_method": "基礎工法",
+        "wetland": "濕地條件",
+        "detention_volume_m3": "排水 / 滯洪",
+    }
+    for key, label in required_fields.items():
+        if not has_value(profile.get(key)):
+            missing.append(label)
+    if not safe_list(profile.get("route_strategy")):
+        missing.append("路線策略")
+    if not safe_list(profile.get("engineering_constraints")):
+        missing.append("工程限制")
+    if not safe_list(profile.get("environment_constraints")):
+        missing.append("環境限制")
+    if not safe_list(profile.get("bridge_type_candidates")):
+        missing.append("橋型候選")
+    if not safe_list(profile.get("bim_required_elements")):
+        missing.append("BIM 構件")
+    if not safe_raw_str(notes):
+        missing.append("知識筆記")
+    if len(pdf_docs) == 0:
+        missing.append("PDF 文件")
+    if len(source_links) == 0:
+        missing.append("網址資料來源")
+    return list(dict.fromkeys(missing))
+
+
+def _prep_analysis(
+    profile: dict | None,
+    notes: str = "",
+    pdfs: Any = None,
+    source_links: list | None = None,
+) -> tuple[dict, str, dict[str, list[str]], list, list, float, dict[str, str], list[str]]:
+    profile = profile or {}
+    notes = safe_raw_str(notes)
+    if isinstance(pdfs, dict):
+        pdfs_cat: dict[str, list[str]] = pdfs
+        pdf_docs = list_pdfs()
+    elif isinstance(pdfs, list):
+        pdf_docs = pdfs
+        pdfs_cat = pdfs_by_cat()
+    else:
+        pdf_docs = list_pdfs()
+        pdfs_cat = pdfs_by_cat()
+    source_links = source_links if source_links is not None else load_source_links()
+    readiness_score = project_readiness(profile, notes, pdf_docs, source_links)
+    confidence = get_confidence_level(readiness_score)
+    missing = get_missing_data(profile, notes, pdf_docs, source_links)
+    return profile, notes, pdfs_cat, pdf_docs, source_links, readiness_score, confidence, missing
+
+
+def confidence_section(
+    confidence: dict[str, str],
+    readiness_score: float,
+    missing: list[str],
+) -> str:
+    miss_text = _bl(missing[:20]) if missing else "- 尚無顯著缺項登錄（正式設計仍須專業複核）"
+    return f"""## 分析可信度
+
+| 項目 | 內容 |
+|------|------|
+| 可信度等級 | **{confidence['level']}**（{confidence['level_en']}） |
+| 分析階段 | {confidence['stage']} |
+| 資料準備度 | {int(safe_number(readiness_score, 0))}%（代表資料齊全程度，非工程可行性百分比） |
+
+### 說明
+
+{confidence['description']}
+
+### 主要資料缺口
+
+{miss_text}
+
+---
+"""
+
+
+def can_recommend_bridge_type(readiness_score: float) -> str:
+    score = safe_number(readiness_score, 0)
+    if score < 40:
+        return "否 — 目前資料不足以推薦單一橋型，僅能進行方向性討論。"
+    if score < 75:
+        return "部分 — 可提出方案方向供比較，但不應定案單一橋型。"
+    return "可討論 — 可提出橋型方向作為概念設計起點，仍需專業工程師複核。"
+
+
+def analysis_completion_message(confidence: dict[str, str]) -> str:
+    level_en = confidence.get("level_en", "Low")
+    if level_en == "Low":
+        return "分析完成：目前為初步判斷"
+    if level_en == "Medium":
+        return "分析完成：可進入方案討論"
+    return "分析完成：可進入概念設計"
+
+
+def safe_generate_output(
+    filename: str,
+    generator_func: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
+) -> bool:
+    try:
+        content = generator_func(*args, **kwargs)
+        if isinstance(content, tuple):
+            return True
+        write_out(filename, str(content))
+        return True
+    except Exception as e:
+        fallback = f"""# Output Generation Failed
+
+檔案：{filename}
+
+系統已避免整體中斷。
+
+錯誤：
+
+```text
+{str(e)}
+```
+
+請檢查對應 gen_* 函式。
+"""
+        write_out(filename, fallback)
+        return False
+
+
+# ── Generators (Apple-style outputs) ─────────────────────────────────────────
+def gen_recommendation(
+    profile: dict | None,
+    notes: str = "",
+    pdfs: Any = None,
+    source_links: list | None = None,
+    readiness: int | None = None,
+) -> str:
+    p, notes, pdfs_cat, pdf_docs, source_links, readiness_score, confidence, missing = _prep_analysis(
+        profile, notes, pdfs, source_links
+    )
+    if readiness is not None:
+        readiness_score = safe_number(readiness, readiness_score)
+    score = safe_number(readiness_score, 0)
+    concepts = safe_list(p.get("possible_design_concepts"))
+    candidates = safe_list(p.get("bridge_type_candidates"))
+
+    known_data = [
+        f"專案名稱：{safe_str(p.get('project_name'))}",
+        f"基地位置：{safe_str(p.get('location'))}",
+        f"PDF：{len(pdf_docs)} 份",
+        f"網址：{len(source_links)} 筆",
+        f"筆記：{len(notes)} 字",
+    ]
+    if has_value(p.get("river_width")):
+        known_data.append(f"河寬：{safe_str(p.get('river_width'))}")
+    if has_value(p.get("soil_type")):
+        known_data.append(f"地層：{safe_str(p.get('soil_type'))}")
+
+    if score < 40:
         rec_block = f"""## Recommendation
 
-建議優先評估：**{rec}**
+**不提供橋型建議**（{confidence['level']}）。
 
-## Key Reasons
+### 專案目標
 
-- 符合專案目標：{p.get("bridge_type_goal", "")}
-- 已具備基本工程與環境資料
-- 可進入概念設計與 BIM 參數化階段
+{safe_str(p.get("bridge_type_goal"))}
 
-## Main Risks
+### 基地位置
 
-{_bl(missing[:4]) if missing else "- 細部地質與發包風險仍需確認"}
+{safe_str(p.get("location"))}
 
-## Next Actions
+### 已有資料
 
-1. 確認推薦方案與團隊共識
-2. 建立 BIM 構件清單
-3. 準備簡報與決策材料
+{_bl(known_data)}
+
+### 潛在風險
+
+- 資料不足即定案可能導致設計偏差
+- 環評、地質、水文尚未齊全時，施工與發包風險偏高
+
+### 下一步
+
+{_bl(missing[:10])}
+"""
+    elif score < 75:
+        opts = concepts or candidates
+        direction = safe_join(opts[:4], "尚無具體橋型候選，請先補充案例與需求")
+        rec_block = f"""## Recommendation
+
+**方向性建議**（{confidence['level']}）
+
+可從以下方向展開討論：{direction}
+
+> 此建議為**中可信度**，需後續資料驗證後才能進入定案。
+
+### 專案目標
+
+{safe_str(p.get("bridge_type_goal"))}
+
+### 已有資料
+
+{_bl(known_data)}
+
+### 下一步
+
+{_bl(missing[:8])}
 """
     else:
+        direction = safe_str(concepts[0] if concepts else safe_join(candidates[:2]))
         rec_block = f"""## Recommendation
 
-目前資料不足，尚無法提出可靠橋型建議。
+**橋型方向**（{confidence['level']}）
 
-## Key Reasons
+可優先討論：{direction}
 
-- 關鍵工程或環境資料尚未齊全
-- 缺少足夠參考文件或筆記
+> 仍需**專業工程師複核**與正式規範、地質、環評確認。
 
-## Main Risks
+### 專案目標
 
-- 過早定案可能導致決策偏差
+{safe_str(p.get("bridge_type_goal"))}
 
-## Next Actions
+### 已有資料
 
-{_bl(missing[:7])}
+{_bl(known_data)}
+
+### 下一步
+
+- 確認團隊共識與 BIM 構件清單
+- 補齊尚未具備之缺項資料
 """
 
     return f"""# BridgeMind Recommendation
 
+{confidence_section(confidence, readiness_score, missing)}
+
 ## Current Status
 
-- 專案：{p.get("project_name")}
-- 位置：{p.get("location")}
-- {status}
+- 資料準備度：{int(score)}%（非工程可行性百分比）
+- PDF {len(pdf_docs)} 份 · 網址 {len(source_links)} 筆 · 筆記 {len(notes)} 字
 
 {rec_block}
 """
 
 
-def gen_executive_summary(p: dict, notes: str, pdfs: dict, readiness: int) -> str:
-    missing = missing_items(p, notes, pdfs)
-    sufficient = data_sufficient(p, notes, pdfs)
-    link_n = len(load_source_links())
+def gen_executive_summary(
+    profile: dict | None,
+    notes: str = "",
+    pdfs: Any = None,
+    source_links: list | None = None,
+    readiness: int | None = None,
+) -> str:
+    p, notes, pdfs_cat, pdf_docs, source_links, readiness_score, confidence, missing = _prep_analysis(
+        profile, notes, pdfs, source_links
+    )
+    if readiness is not None:
+        readiness_score = safe_number(readiness, readiness_score)
+
     return f"""# Executive Summary
+
+{confidence_section(confidence, readiness_score, missing)}
 
 ## Project
 
-{p.get("project_name")} · {p.get("location")} · {p.get("bridge_type_goal")}
+{safe_str(p.get("project_name"))} · {safe_str(p.get("location"))} · {safe_str(p.get("bridge_type_goal"))}
 
 ## Status
 
-{"資料已足夠進行初步分析。" if sufficient else "資料尚不足，建議先補充關鍵資料。"}
+{confidence['description']}
 
 ## What We Know
 
-- 已填寫之工程與專案欄位
-- PDF 文件 {sum(len(v) for v in pdfs.values())} 份
-- 網址資料 {link_n} 筆
-- 知識筆記 {len(notes.strip())} 字
+- PDF 文件 {len(pdf_docs)} 份
+- 網址資料 {len(source_links)} 筆
+- 知識筆記 {len(notes)} 字
+- 河寬：{safe_str(p.get("river_width"), "未提供")}
+- 地層：{safe_str(p.get("soil_type"), "未提供")}
 
 ## What Is Missing
 
-{_bl(missing[:6]) if missing else "- 無重大缺項"}
+{_bl(missing[:8]) if missing else "- 無顯著缺項（仍建議複核）"}
 
 ## Next Step
 
@@ -1064,82 +1383,110 @@ def gen_executive_summary(p: dict, notes: str, pdfs: dict, readiness: int) -> st
 """
 
 
-def gen_decision_dashboard(p: dict, notes: str, readiness: int) -> str:
-    conf = confidence_level(p, notes)
-    stage = decision_stage(p, notes)
-    why = [
-        f"專案準備度 {readiness}%，目前處於 {stage} 階段。",
-        f"信心水準：{conf}。",
-        readiness_hint(p, notes, list_pdfs()),
-    ]
+def gen_decision_dashboard(
+    profile: dict | None,
+    notes: str = "",
+    pdfs: Any = None,
+    source_links: list | None = None,
+    readiness: int | None = None,
+) -> str:
+    p, notes, pdfs_cat, pdf_docs, source_links, readiness_score, confidence, missing = _prep_analysis(
+        profile, notes, pdfs, source_links
+    )
+    if readiness is not None:
+        readiness_score = safe_number(readiness, readiness_score)
+
+    score = int(safe_number(readiness_score, 0))
     return f"""# Decision Dashboard
+
+{confidence_section(confidence, readiness_score, missing)}
 
 ## Project Readiness
 
-{readiness}% — {project_status_label(p, notes)}
-
-## Confidence
-
-{conf}
+{score}% — 代表目前**輸入資料齊全程度**，不代表工程已 100% 可行。
 
 ## Decision Stage
 
-{stage}
+{confidence['decision_stage']}
 
-## Why
+## Confidence
 
-{chr(10).join(why)}
+{confidence['level']}（{confidence['level_en']}）
+
+## What This Means
+
+{confidence['description']}
+
+## Can We Recommend a Bridge Type?
+
+{can_recommend_bridge_type(readiness_score)}
+
+## Next Step
+
+{next_action_zh(p, notes)}
 """
 
 
-def _md_table(headers: list[str], rows: list[list[str]]) -> str:
-    if not rows:
-        return ""
-    sep = "| " + " | ".join(headers) + " |"
-    line = "| " + " | ".join("---" for _ in headers) + " |"
-    body = "\n".join("| " + " | ".join(r) + " |" for r in rows)
-    return f"{sep}\n{line}\n{body}"
+def gen_research(
+    profile: dict | None,
+    notes: str = "",
+    pdfs: Any = None,
+    source_links: list | None = None,
+) -> str:
+    p, notes, pdfs_cat, pdf_docs, source_links, readiness_score, confidence, missing = _prep_analysis(
+        profile, notes, pdfs, source_links
+    )
+    docs = pdf_docs if pdf_docs else get_uploaded_documents()
+    notes_len = len(notes)
 
-
-def gen_research(p: dict, notes: str, pdfs: dict) -> str:
-    missing = missing_items(p, notes, pdfs)
-    links = load_source_links()
-    docs = get_uploaded_documents()
-    notes_len = len(notes.strip())
-
-    if links:
+    if source_links:
         link_rows = [
-            [lnk.get("title", ""), lnk.get("category", ""), lnk.get("url", ""), lnk.get("note", "") or "—"]
-            for lnk in links
+            [
+                safe_str(lnk.get("title")),
+                safe_str(lnk.get("category")),
+                safe_str(lnk.get("url")),
+                safe_str(lnk.get("note"), "—"),
+            ]
+            for lnk in source_links
         ]
-        links_block = "## 網址資料來源\n\n" + _md_table(["標題", "分類", "URL", "備註"], link_rows)
+        links_block = "## 網址資料來源\n\n" + md_table(["標題", "分類", "URL", "備註"], link_rows)
     else:
         links_block = "## 網址資料來源\n\n目前尚未新增任何網址資料來源。"
 
     if docs:
-        pdf_rows = [[d["name"], d["category"], d["size_display"]] for d in docs]
-        pdfs_block = "## PDF 文件來源\n\n" + _md_table(["文件名稱", "分類", "大小"], pdf_rows)
+        pdf_rows = [
+            [safe_str(d.get("name")), safe_str(d.get("category")), safe_str(d.get("size_display", d.get("size", "")))]
+            for d in docs
+        ]
+        pdfs_block = "## PDF 文件來源\n\n" + md_table(["文件名稱", "分類", "大小"], pdf_rows)
     else:
         pdfs_block = "## PDF 文件來源\n\n目前尚未上傳任何 PDF 文件。"
 
-    notes_status = "有內容" if notes_len > 0 else "尚無內容"
-    notes_block = f"""## 知識筆記狀態
+    if notes_len > 0:
+        notes_block = f"""## 知識筆記狀態
 
 - 字數：{notes_len}
-- 是否有內容：{notes_status}
+- 是否有內容：有內容
+"""
+    else:
+        notes_block = """## 知識筆記狀態
+
+目前尚未建立知識筆記。
 """
 
     return f"""# 資料研究摘要
 
+{confidence_section(confidence, readiness_score, missing)}
+
 ## 摘要
 
-已盤點專案資料、{len(docs)} 份 PDF 與 {len(links)} 筆網址來源。
+已盤點專案資料、{len(docs)} 份 PDF 與 {len(source_links)} 筆網址來源（{confidence['level']}）。
 
 ## 已有資料
 
-- 專案：{p.get("project_name")}
-- 河寬：{p.get("river_width") or "未填"}
-- 地層：{p.get("soil_type") or "未填"}
+- 專案：{safe_str(p.get("project_name"))}
+- 河寬：{safe_str(p.get("river_width"), "未提供")}
+- 地層：{safe_str(p.get("soil_type"), "未提供")}
 
 {links_block}
 
@@ -1147,227 +1494,492 @@ def gen_research(p: dict, notes: str, pdfs: dict) -> str:
 
 {notes_block}
 
-## 缺少資料
+## 資料缺口
 
 {_bl(missing) if missing else "無"}
 """
 
 
-def gen_engineering(p: dict, notes: str, pdfs: dict) -> str:
-    if not has_basic_engineering(p):
-        return f"""# 工程可行性分析
+def gen_engineering(
+    profile: dict | None,
+    notes: str = "",
+    pdfs: Any = None,
+    source_links: list | None = None,
+) -> str:
+    p, notes, pdfs_cat, pdf_docs, source_links, readiness_score, confidence, missing = _prep_analysis(
+        profile, notes, pdfs, source_links
+    )
+    known: list[str] = []
+    unknown: list[str] = []
+    field_map = {
+        "river_width": "河寬",
+        "bridge_length": "橋梁全長",
+        "bridge_width_m": "橋面寬度",
+        "soil_type": "地層條件",
+        "foundation_method": "基礎工法",
+        "design_speed_kmh": "設計速率",
+    }
+    for key, label in field_map.items():
+        if has_value(p.get(key)):
+            known.append(f"{label}：{safe_str(p.get(key))}")
+        else:
+            unknown.append(label)
 
-## 工程可行性摘要
+    eng_constraints = safe_list(p.get("engineering_constraints"))
+    prelim_issues = eng_constraints[:6] if eng_constraints else [
+        "跨距與橋墩配置尚未定案",
+        "地質承載力需正式鑽探確認",
+        "防洪與水文條件需補充",
+    ]
+    risks = [
+        "軟弱地盤或差異沉陷風險（待地質資料確認）",
+        "施工期交通與便道影響",
+        "洪汛期水位與沖刷",
+    ]
 
-資料不足，尚無法確認工程可行性。
-
-## 下一步工程資料需求
-
-{_bl(missing_items(p, notes, pdfs)[:6])}
-"""
     return f"""# 工程可行性分析
 
+{confidence_section(confidence, readiness_score, missing)}
+
 ## 工程可行性摘要
 
-依現有河寬、地層與基礎資料，可進行**初步**工程討論。
+本報告為**{confidence['level']}**下的工程討論，並非「工程可行性 100%」之結論。
 
-## 重點
+## Known Conditions
 
-- 河寬：{p.get("river_width")}
-- 地層：{p.get("soil_type")}
-- 基礎：{p.get("foundation_method") or "待填"}
+{_bl(known) if known else "- 尚無已登錄之工程欄位"}
 
-## 風險
+## Unknown Conditions
 
-軟弱地盤、防洪、施工交通 — 需進一步驗證。
+{_bl(unknown) if unknown else "- 無（仍建議複核）"}
+
+## Preliminary Engineering Issues
+
+{_bl(prelim_issues)}
+
+## Risk Assumptions
+
+{_bl(risks)}
+
+## Next Engineering Data Needed
+
+{_bl([m for m in missing if any(k in m for k in ("河", "橋", "地", "基礎", "速率", "工程"))][:8]) or "- 補充河寬、橋長、地層、基礎工法與交通條件"}
 """
 
 
-def gen_environmental(p: dict, notes: str, pdfs: dict) -> str:
+def gen_environmental(
+    profile: dict | None,
+    notes: str = "",
+    pdfs: Any = None,
+    source_links: list | None = None,
+) -> str:
+    p, notes, pdfs_cat, pdf_docs, source_links, readiness_score, confidence, missing = _prep_analysis(
+        profile, notes, pdfs, source_links
+    )
+    env_list = safe_list(p.get("environment_constraints"))
+    has_env = bool(pdfs_cat.get("環評資料")) or _category_has_data(
+        "環評資料", pdfs_cat, source_links
+    )
+    known_env = []
+    if has_value(p.get("wetland")):
+        known_env.append(f"濕地：{safe_str(p.get('wetland'))}")
+    if env_list:
+        known_env.extend([f"限制：{e}" for e in env_list[:5]])
+
+    sensitive = [
+        "濕地與洪氾區影響",
+        "水質與施工排水",
+        "生態棲地與保育物種",
+        "噪音與振動",
+        "施工便道與交通擾動",
+        "原生植栽移植或補償",
+    ]
+    mitigations = [
+        "低衝擊工法與分階施工",
+        "沉泥池與水質監測",
+        "生態監測與補償計畫",
+        "噪音防制與施工時間管制",
+    ]
+    env_missing = [m for m in missing if any(k in m for k in ("環", "濕", "環評", "筆記", "PDF", "網址"))]
+
     return f"""# 環境永續分析
 
-## 環境影響摘要
+{confidence_section(confidence, readiness_score, missing)}
 
-濕地：{p.get("wetland") or "未填"}
-環境限制：{len(p.get("environment_constraints", []))} 項
+## Known Environmental Conditions
 
-## 減輕對策
+{_bl(known_env) if known_env else "- 尚未登錄具體環境欄位，以下為常見需確認項目"}
 
-低衝擊施工、水質防制、生態監測
+## Potential Sensitive Issues
+
+{_bl(sensitive)}
+
+## Mitigation Direction
+
+{_bl(mitigations)}
+
+## Missing Environmental Data
+
+{_bl(env_missing[:8]) if env_missing else "- 建議補充環評文件、濕地調查與水質資料"}
+
+環評相關來源：{"已具備部分" if has_env else "尚未具備"}
+
+{confidence['description']}
+"""
+
+
+def gen_design(
+    profile: dict | None,
+    notes: str = "",
+    pdfs: Any = None,
+    source_links: list | None = None,
+) -> tuple[str, dict]:
+    p, notes, pdfs_cat, pdf_docs, source_links, readiness_score, confidence, missing = _prep_analysis(
+        profile, notes, pdfs, source_links
+    )
+    score = safe_number(readiness_score, 0)
+    concepts = safe_list(p.get("possible_design_concepts"))
+    candidates = safe_list(p.get("bridge_type_candidates"))
+
+    if score >= 75 and concepts:
+        rec = concepts[0]
+        rec_md = (
+            f"可提出橋型方向：**{rec}**（{confidence['level']}）。"
+            "\n\n> 仍需專業工程師複核。"
+        )
+    elif score >= 40 and (concepts or candidates):
+        rec = None
+        rec_md = (
+            f"方向性選項：{safe_join((concepts or candidates)[:4])}。"
+            "\n\n> 此建議為**中可信度**，需後續資料驗證。"
+        )
+    else:
+        rec = None
+        rec_md = """目前尚無法可靠推薦單一橋型。
+
+可先建立**候選橋型比較框架**（例如：梁橋、拱橋、斜張橋、景觀橋），待補齊河寬、地質、環評與案例後再篩選。"""
+
+    bim_can = [
+        "道路線形概念",
+        "橋面板概念",
+        "橋墩位置草案",
+        "景觀元素分類",
+        "資料欄位架構",
+    ]
+    bim_user = safe_list(p.get("bim_required_elements"))
+    if bim_user:
+        bim_can.extend(bim_user[:8])
+    bim_cannot = [
+        "主跨長度",
+        "橋塔高度",
+        "橋墩數量",
+        "材料規格",
+        "基礎深度",
+    ]
+
+    bim = {
+        "recommended_concept": rec,
+        "confidence_level": confidence["level"],
+        "readiness_score": int(score),
+        "can_establish": bim_can,
+        "cannot_determine_yet": bim_cannot,
+        "required_bim_components": bim_user,
+        "bridge_width_m": p.get("bridge_width_m"),
+        "river_width": p.get("river_width"),
+        "status": "framework_only" if score < 40 else ("preliminary" if score < 75 else "concept_ready"),
+    }
+
+    md = f"""# 設計與 BIM 規劃
+
+{confidence_section(confidence, readiness_score, missing)}
+
+## 設計方向
+
+{rec_md}
+
+## BIM 可先建立
+
+{_bl(bim_can)}
+
+## BIM 尚無法確定
+
+{_bl(bim_cannot)}
 
 ## 缺少資料
 
-{"環評文件" if not pdfs.get("環評資料") else "已部分具備"}
+{_bl(missing[:8]) if missing else "無"}
 """
+    return md, bim
 
 
-def gen_design(p: dict, notes: str, pdfs: dict) -> tuple[str, dict]:
-    sufficient = data_sufficient(p, notes, pdfs)
-    missing = missing_items(p, notes, pdfs)
-    concepts = p.get("possible_design_concepts", [])
-    rec = concepts[0] if sufficient and concepts else ""
-
-    bim = {
-        "recommended_concept": rec or None,
-        "required_bim_components": p.get("bim_required_elements", []),
-        "bridge_width_m": p.get("bridge_width_m"),
-        "river_width": p.get("river_width"),
-        "status": "ready" if sufficient else "insufficient",
-    }
-
-    if not sufficient:
-        md = f"""# 設計與 BIM 規劃
-
-目前資料不足，尚無法可靠推薦橋型。
-
-請補充：河寬、橋長、地層、環評、交通需求與案例。
-
-{_bl(missing[:8])}
-"""
-        return md, bim
-
-    return f"""# 設計與 BIM 規劃
-
-## 推薦概念
-
-{rec}
-
-## BIM 構件
-
-{len(p.get("bim_required_elements", []))} 項已列出
-""", bim
-
-
-def gen_ai(p: dict) -> str:
-    ai = p.get("ai_requirements", {})
+def gen_ai(
+    profile: dict | None,
+    notes: str = "",
+    pdfs: Any = None,
+    source_links: list | None = None,
+) -> str:
+    p, notes, pdfs_cat, pdf_docs, source_links, readiness_score, confidence, missing = _prep_analysis(
+        profile, notes, pdfs, source_links
+    )
+    ai = p.get("ai_requirements") or {}
+    if not isinstance(ai, dict):
+        ai = {}
+    plain: list[tuple[str, str, str]] = [
+        ("use_rag", "RAG 文件檢索", "像智慧圖書館員，從環評、法規與案例 PDF 中快速找出重點，不用從頭翻完整份報告。"),
+        ("use_cnn", "CNN 影像辨識", "用攝影機或空拍影像自動發現裂縫、施工進度或現場異常，減少人力巡檢負擔。"),
+        ("use_pinn", "PINN 物理模擬", "把力學與水文物理定律放進 AI，在資料不多時也能做較合理的結構或水流初步模擬。"),
+        ("use_agentic_ai", "Agentic AI 多代理", "讓不同專業（結構、環評、法規、BIM）像團隊分工，由系統協調產出一致結論。"),
+        ("use_digital_twin", "Digital Twin 數位孿生", "建成後在虛擬模型上對照感測器數據，預警維修與營運風險。"),
+        ("use_generative_ai", "Generative AI 生成式設計", "快速產生橋型草圖、景觀意象或簡報視覺，供團隊討論而非直接定案。"),
+    ]
     lines = []
-    if ai.get("use_rag"):
-        lines.append("- **文件檢索**：自動閱讀環評與法規重點")
-    if ai.get("use_agentic_ai"):
-        lines.append("- **多專業協作**：不同分析模組分工")
-    if ai.get("use_cnn"):
-        lines.append("- **影像辨識**：現場裂縫與施工監看")
-    if ai.get("use_pinn"):
-        lines.append("- **物理模擬**：加速結構與水文計算")
-    if ai.get("use_digital_twin"):
-        lines.append("- **數位孿生**：營運期監測維護")
-    if ai.get("use_generative_ai"):
-        lines.append("- **生成式設計**：橋型與視覺方案探索")
-    body = "\n".join(lines) if lines else "- 尚未啟用 AI 方向（可於 Data → 進階設定勾選）"
+    for key, title, desc in plain:
+        if ai.get(key):
+            lines.append(f"### {title}\n\n{desc}")
+    body = "\n\n".join(lines) if lines else (
+        "尚未在專案中勾選 AI 方向。可至 Data Hub → Advanced Details 啟用，"
+        "或於簡報中說明未來可導入的技術路線。"
+    )
+
     return f"""# AI 導入策略
 
-## 白話說明
+{confidence_section(confidence, readiness_score, missing)}
+
+## 白話說明（給評審）
 
 {body}
+
+## 與目前可信度的關係
+
+{confidence['level']}：{confidence['description']}
 """
 
 
-def gen_cost(p: dict) -> str:
-    if empty(p.get("bridge_length")) and empty(p.get("bridge_width_m")):
-        return """# 經費與工期分析
+def gen_cost(
+    profile: dict | None,
+    notes: str = "",
+    pdfs: Any = None,
+    source_links: list | None = None,
+) -> str:
+    p, notes, pdfs_cat, pdf_docs, source_links, readiness_score, confidence, missing = _prep_analysis(
+        profile, notes, pdfs, source_links
+    )
+    has_scale = has_value(p.get("bridge_length")) or has_value(p.get("bridge_width_m"))
+    has_bridge_type = bool(safe_list(p.get("bridge_type_candidates"))) or bool(
+        safe_list(p.get("possible_design_concepts"))
+    )
+    has_method = has_value(p.get("foundation_method"))
+    can_estimate = has_scale and has_bridge_type and has_method
 
-## 摘要
+    if not can_estimate:
+        body = """## 摘要
 
-缺少橋梁尺度與工法，尚無法估算。
+**目前資料不足，尚不適合估算具體工程金額。**
 
-## 缺少
+缺少橋型、橋長、工法或發包策略等關鍵條件時，任何數字都可能誤導決策。
 
-橋長、橋型、工法、工期條件
+## 可說明之架構（非估價）
+
+- 規劃 → 設計 → 施工 → 驗收
+- 待資料齊全後再進行概算與工期模擬
+
+## 尚需資料
+
+橋梁尺度、橋型、材料規格、基礎工法、工期限制、發包方式
 """
-    return f"""# 經費與工期分析
+    else:
+        body = """## 摘要
 
-## 摘要
-
-可提出初步成本與工期**架構**，正式估算需設計深化。
+可說明經費與工期**討論架構**，但仍**不提供具體金額**；正式估價需設計圖、材料規格、數量清單與市場單價。
 
 ## 工期架構
 
 規劃 → 設計 → 施工 → 驗收
 """
 
+    return f"""# 經費與工期分析
 
-def gen_final_report(p: dict, notes: str, pdfs: dict) -> tuple[str, str]:
-    rec = p.get("possible_design_concepts", [""])[0] if data_sufficient(p, notes, pdfs) else "（待資料補齊）"
-    final = f"""# {p.get("project_name")} — 最終報告
+{confidence_section(confidence, readiness_score, missing)}
+
+{body}
+"""
+
+
+def gen_final_report(
+    profile: dict | None,
+    notes: str = "",
+    pdfs: Any = None,
+    source_links: list | None = None,
+) -> tuple[str, str]:
+    p, notes, pdfs_cat, pdf_docs, source_links, readiness_score, confidence, missing = _prep_analysis(
+        profile, notes, pdfs, source_links
+    )
+    score = safe_number(readiness_score, 0)
+    concepts = safe_list(p.get("possible_design_concepts"))
+
+    if score >= 75 and concepts:
+        design_rec = f"可討論優先概念：{concepts[0]}（需複核）。"
+    elif score >= 40:
+        design_rec = "尚處方案比較階段，不宜定案單一橋型。"
+    else:
+        design_rec = "資料不足，設計建議僅供方向參考，請補齊資料。"
+
+    pname = safe_str(p.get("project_name"), "橋梁專案")
+    final = f"""# {pname} — 最終報告
+
+> **本報告為初步分析版本。**
+> 目前資料可信度：**{confidence['level']}**。
+> 所有工程與設計建議仍需專業審查確認。
+
+{confidence_section(confidence, readiness_score, missing)}
 
 ## 專案背景
 
-{p.get("location")} · {p.get("bridge_type_goal")}
+{safe_str(p.get("location"))} · {safe_str(p.get("bridge_type_goal"))}
 
 ## 工程可行性
 
-見工程分析章節。
+見 `engineering_analysis.md`（{confidence['level']}）。
 
 ## 環境永續
 
-見環境分析章節。
+見 `environmental_sustainability.md`。
 
 ## 設計建議
 
-{rec}
+{design_rec}
 
 ## 結論
 
-補齊資料後可進入概念設計與簡報階段。
+{confidence['description']}
 """
     ppt = f"""# 簡報大綱
 
 | # | 內容 |
 |---|------|
-| 1 | 封面 — {p.get("project_name")} |
+| 1 | 封面 — {pname} |
 | 2 | 專案背景 |
 | 3 | 現況與挑戰 |
 | 4 | BridgeMind 方法 |
-| 5 | 資料與研究 |
+| 5 | 資料與研究（可信度：{confidence['level']}） |
 | 6 | 工程分析 |
 | 7 | 環境永續 |
 | 8 | 設計方向 |
 | 9 | BIM |
 | 10 | AI 導入 |
 | 11 | 經費工期 |
-| 12 | 推薦方案 |
+| 12 | 方案討論（非定案） |
 | 13 | 創新價值 |
-| 14 | 風險 |
+| 14 | 風險與缺資料 |
 | 15 | 結論 |
 """
     return final, ppt
 
 
-def run_pipeline(p: dict, notes: str, cb: Callable | None = None) -> None:
-    pdfs = pdfs_by_cat()
-    readiness = project_readiness(p, notes, list_pdfs())
+def _safe_run_design(
+    profile: dict,
+    notes: str,
+    pdfs_cat: dict,
+    source_links: list,
+) -> None:
+    try:
+        md, bim = gen_design(profile, notes, pdfs_cat, source_links)
+        write_out("design_bim_visualization.md", md)
+        write_out("bim_parameters.json", json.dumps(bim, ensure_ascii=False, indent=2))
+    except Exception as e:
+        err = f"""# design_bim_visualization.md
 
-    steps: list[tuple[str, Callable[[], None]]] = [
-        ("research", lambda: write_out("research_summary.md", gen_research(p, notes, pdfs))),
-        ("engineering", lambda: write_out("engineering_analysis.md", gen_engineering(p, notes, pdfs))),
-        ("environment", lambda: write_out("environmental_sustainability.md", gen_environmental(p, notes, pdfs))),
-        ("design", lambda: _run_design(p, notes, pdfs)),
-        ("ai", lambda: write_out("ai_integration_plan.md", gen_ai(p))),
-        ("cost", lambda: write_out("cost_schedule_analysis.md", gen_cost(p))),
-        ("report", lambda: _run_report(p, notes, pdfs)),
+## 產生失敗
+
+```text
+{str(e)}
+```
+"""
+        write_out("design_bim_visualization.md", err)
+        write_out(
+            "bim_parameters.json",
+            json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False, indent=2),
+        )
+
+
+def _safe_run_report(
+    profile: dict,
+    notes: str,
+    pdfs_cat: dict,
+    source_links: list,
+) -> None:
+    try:
+        final_md, ppt = gen_final_report(profile, notes, pdfs_cat, source_links)
+        write_out("final_report.md", final_md)
+        write_out("ppt_outline.md", ppt)
+    except Exception as e:
+        fallback = f"""# final_report.md
+
+## 產生失敗
+
+```text
+{str(e)}
+```
+"""
+        write_out("final_report.md", fallback)
+        write_out("ppt_outline.md", f"# 簡報大綱\n\n產生失敗：{str(e)}\n")
+
+
+def run_pipeline(
+    profile: dict | None = None,
+    notes: str | None = None,
+    pdfs: Any = None,
+    source_links: list | None = None,
+    cb: Callable | None = None,
+) -> None:
+    profile = profile or {}
+    notes = safe_raw_str(notes)
+    pdf_docs = list_pdfs() if pdfs is None else (list_pdfs() if isinstance(pdfs, dict) else pdfs)
+    source_links = source_links if source_links is not None else load_source_links()
+    pdfs_cat = pdfs if isinstance(pdfs, dict) else pdfs_by_cat()
+    readiness = int(project_readiness(profile, notes, pdf_docs, source_links))
+
+    steps: list[tuple[str, Callable[[], Any]]] = [
+        ("research", lambda: safe_generate_output(
+            "research_summary.md", gen_research, profile, notes, pdf_docs, source_links,
+        )),
+        ("engineering", lambda: safe_generate_output(
+            "engineering_analysis.md", gen_engineering, profile, notes, pdf_docs, source_links,
+        )),
+        ("environment", lambda: safe_generate_output(
+            "environmental_sustainability.md", gen_environmental, profile, notes, pdf_docs, source_links,
+        )),
+        ("design", lambda: (_safe_run_design(profile, notes, pdfs_cat, source_links), "")),
+        ("ai", lambda: safe_generate_output(
+            "ai_integration_plan.md", gen_ai, profile, notes, pdf_docs, source_links,
+        )),
+        ("cost", lambda: safe_generate_output(
+            "cost_schedule_analysis.md", gen_cost, profile, notes, pdf_docs, source_links,
+        )),
+        ("report", lambda: (_safe_run_report(profile, notes, pdfs_cat, source_links), "")),
     ]
+
     for i, (key, fn) in enumerate(steps):
         if cb:
             cb(key, i, len(steps), "running")
-        fn()
+        try:
+            fn()
+        except Exception:
+            pass
         if cb:
             cb(key, i, len(steps), "done")
 
-    write_out("00_bridgemind_recommendation.md", gen_recommendation(p, notes, pdfs, readiness))
-    write_out("01_executive_summary.md", gen_executive_summary(p, notes, pdfs, readiness))
-    write_out("02_decision_dashboard.md", gen_decision_dashboard(p, notes, pdfs, readiness))
-
-
-def _run_design(p: dict, notes: str, pdfs: dict) -> None:
-    md, bim = gen_design(p, notes, pdfs)
-    write_out("design_bim_visualization.md", md)
-    write_out("bim_parameters.json", json.dumps(bim, ensure_ascii=False, indent=2))
-
-
-def _run_report(p: dict, notes: str, pdfs: dict) -> None:
-    f, ppt = gen_final_report(p, notes, pdfs)
-    write_out("final_report.md", f)
-    write_out("ppt_outline.md", ppt)
+    for fname, gen_fn in [
+        ("00_bridgemind_recommendation.md", gen_recommendation),
+        ("01_executive_summary.md", gen_executive_summary),
+        ("02_decision_dashboard.md", gen_decision_dashboard),
+    ]:
+        try:
+            safe_generate_output(
+                fname, gen_fn, profile, notes, pdf_docs, source_links, readiness,
+            )
+        except Exception:
+            pass
 
 
 # ── UI: Onboarding ───────────────────────────────────────────────────────────
@@ -1816,6 +2428,32 @@ def page_data(p: dict) -> None:
                 st.rerun()
 
 
+def render_analysis_status_card(p: dict) -> None:
+    """v2.0：分析完成後顯示可信度、階段與下一步建議。"""
+    notes = load_notes()
+    pdf_docs = list_pdfs()
+    links = load_source_links()
+    readiness = int(project_readiness(p, notes, pdf_docs, links))
+    conf = get_confidence_level(readiness)
+    pill_cls = "ready" if conf["level_en"] == "High" else "warn"
+    st.markdown(
+        f'<div class="glass">'
+        f'<p class="readiness-label">分析可信度 · Analysis Engine v2.0</p>'
+        f'<p style="font-size:1.2rem;font-weight:600;color:#F5F5F7;margin:0.4rem 0 0">'
+        f"{html.escape(analysis_completion_message(conf))}</p>"
+        f'<div style="margin-top:0.85rem;display:flex;flex-wrap:wrap;gap:0.5rem">'
+        f'<span class="status-pill {pill_cls}">可信度：{html.escape(conf["level"])}</span>'
+        f'<span class="status-pill">分析階段：{html.escape(conf["stage"])}</span>'
+        f'<span class="status-pill">準備度 {readiness}%</span>'
+        f"</div>"
+        f'<p class="subhead" style="margin:1rem 0 0">{html.escape(conf["description"])}</p>'
+        f'<p class="caption" style="margin-top:0.65rem">'
+        f"下一步建議：{html.escape(next_action_zh(p, notes))}</p>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+
 # ── UI: Analysis ───────────────────────────────────────────────────────────────
 def page_analysis(p: dict) -> None:
     st.markdown('<p class="display-sm">AI Analysis</p>', unsafe_allow_html=True)
@@ -1835,7 +2473,14 @@ def page_analysis(p: dict) -> None:
 
         with st.spinner("分析中…"):
             run_pipeline(p, notes, cb)
-        status.success("分析完成")
+        pdf_docs = list_pdfs()
+        links = load_source_links()
+        conf = get_confidence_level(project_readiness(p, notes, pdf_docs, links))
+        st.session_state["last_analysis_conf"] = conf
+        st.session_state["last_analysis_readiness"] = int(
+            project_readiness(p, notes, pdf_docs, links)
+        )
+        status.success(analysis_completion_message(conf))
         st.rerun()
 
     st.markdown(pipeline_html(p), unsafe_allow_html=True)
@@ -1848,6 +2493,8 @@ def page_analysis(p: dict) -> None:
             unsafe_allow_html=True,
         )
         return
+
+    render_analysis_status_card(p)
 
     st.markdown('<p class="section-label">Results</p>', unsafe_allow_html=True)
 
