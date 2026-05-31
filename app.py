@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import html
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -179,6 +182,56 @@ hr { border-color: rgba(255,255,255,0.06) !important; margin: 2rem 0 !important;
 .package-desc { font-size: 0.85rem; color: #71717A; margin-bottom: 1rem; }
 
 .card-preview { font-size: 0.9rem; color: #A1A1AA; line-height: 1.65; max-height: 200px; overflow: hidden; }
+
+.doc-list-header {
+  display: grid;
+  grid-template-columns: 1fr 120px 72px 56px;
+  gap: 0.75rem;
+  padding: 0 0.25rem 0.6rem;
+  font-size: 0.68rem;
+  color: #52525B;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 0.25rem;
+}
+.doc-row-wrap {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 14px;
+  padding: 0.65rem 0.85rem;
+  margin-bottom: 0.45rem;
+}
+.doc-row-wrap:hover { border-color: rgba(255,255,255,0.12); }
+.doc-name { font-size: 0.9rem; color: #F5F5F7; font-weight: 500; word-break: break-all; }
+.doc-meta { font-size: 0.82rem; color: #A1A1AA; }
+.doc-preview-box {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  margin: 0.5rem 0;
+  font-size: 0.82rem;
+  color: #A1A1AA;
+  line-height: 1.55;
+}
+.doc-preview-box strong { color: #F5F5F7; font-weight: 500; }
+.doc-action-label { font-size: 0.75rem; color: #71717A; margin-bottom: 0.35rem; }
+.doc-delete-warn {
+  font-size: 0.8rem;
+  color: #FF9F9A;
+  margin: 0.5rem 0 0.25rem;
+  line-height: 1.45;
+}
+div[data-testid="stPopover"] > button {
+  background: rgba(255,255,255,0.05) !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  border-radius: 8px !important;
+  color: #A1A1AA !important;
+  font-size: 1rem !important;
+  padding: 0.2rem 0.55rem !important;
+  min-height: 2rem !important;
+}
 </style>
 """
 
@@ -299,24 +352,87 @@ def list_to_lines(items: list | None) -> str:
     return "\n".join(items or [])
 
 
-def fmt_size(n: int) -> str:
-    return f"{n/1024:.1f} KB" if n >= 1024 else f"{n} B"
+DOCUMENT_FOLDERS = {
+    "environmental_reports": "環評資料",
+    "feasibility_reports": "可行性評估",
+    "bridge_cases": "橋梁案例",
+    "regulations": "法規資料",
+}
+
+
+def format_file_size(size_bytes: int) -> str:
+    if size_bytes >= 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    if size_bytes >= 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    return f"{size_bytes} B"
+
+
+def get_uploaded_documents() -> list[dict]:
+    """掃描四個 raw_documents 子資料夾，回傳 PDF 文件清單。"""
+    docs: list[dict] = []
+    for folder_key, category in DOCUMENT_FOLDERS.items():
+        folder_path = RAW / folder_key
+        folder_path.mkdir(parents=True, exist_ok=True)
+        try:
+            entries = sorted(folder_path.iterdir())
+        except OSError:
+            continue
+        for f in entries:
+            if not f.is_file() or f.name.startswith(".") or f.suffix.lower() != ".pdf":
+                continue
+            try:
+                size_bytes = f.stat().st_size
+            except OSError:
+                size_bytes = 0
+            resolved = str(f.resolve())
+            docs.append({
+                "name": f.name,
+                "category": category,
+                "size_bytes": size_bytes,
+                "size_kb": round(size_bytes / 1024, 1) if size_bytes else 0,
+                "size_display": format_file_size(size_bytes),
+                "path": resolved,
+            })
+    return docs
+
+
+def delete_document(file_path: str) -> tuple[bool, str]:
+    """刪除指定文件，回傳 (成功與否, 訊息)。"""
+    try:
+        path = Path(file_path).resolve()
+        raw_root = RAW.resolve()
+        if raw_root not in path.parents and path != raw_root:
+            return False, "不允許刪除此路徑"
+        if not path.is_file():
+            return False, "檔案不存在"
+        os.remove(path)
+        return True, "刪除成功"
+    except FileNotFoundError:
+        return False, "檔案不存在"
+    except PermissionError:
+        return False, "沒有刪除權限"
+    except OSError as e:
+        return False, str(e)
+    except Exception as e:
+        return False, str(e)
+
+
+def _doc_session_key(doc: dict) -> str:
+    return hashlib.md5(doc["path"].encode("utf-8")).hexdigest()[:12]
 
 
 def list_pdfs() -> list[dict]:
-    rows = []
-    for cat, folder in PDF_CATS.items():
-        if not folder.exists():
-            continue
-        for f in sorted(folder.iterdir()):
-            if f.is_file() and not f.name.startswith("."):
-                rows.append({"name": f.name, "category": cat, "size": fmt_size(f.stat().st_size)})
-    return rows
+    """相容舊邏輯：供分析流程使用。"""
+    return [
+        {"name": d["name"], "category": d["category"], "size": d["size_display"]}
+        for d in get_uploaded_documents()
+    ]
 
 
 def pdfs_by_cat() -> dict[str, list[str]]:
     r = {c: [] for c in PDF_CATS}
-    for row in list_pdfs():
+    for row in get_uploaded_documents():
         r[row["category"]].append(row["name"])
     return r
 
@@ -941,6 +1057,113 @@ def page_project(p: dict) -> None:
     st.markdown(pipeline_html(p), unsafe_allow_html=True)
 
 
+def _render_doc_popover_actions(doc: dict, idx: int) -> None:
+    """單一文件：預覽、下載、刪除（含確認）。"""
+    sk = _doc_session_key(doc)
+    preview_key = f"doc_preview_{sk}"
+    pending_key = f"doc_pending_delete_{sk}"
+
+    popover_fn = getattr(st, "popover", None)
+    container = popover_fn("⋯") if popover_fn else st.expander("⋯ 更多操作")
+
+    with container:
+        st.markdown('<p class="doc-action-label">更多操作</p>', unsafe_allow_html=True)
+
+        if st.button("👁️ 預覽文件", key=f"btn_preview_{sk}", use_container_width=True):
+            st.session_state[preview_key] = not st.session_state.get(preview_key, False)
+
+        if st.session_state.get(preview_key):
+            path = Path(doc["path"])
+            exists = path.is_file()
+            try:
+                rel = path.relative_to(ROOT) if exists else doc["path"]
+            except ValueError:
+                rel = doc["path"]
+            st.markdown(
+                f'<div class="doc-preview-box">'
+                f"<strong>文件名稱</strong><br>{html.escape(doc['name'])}<br><br>"
+                f"<strong>文件分類</strong><br>{html.escape(doc['category'])}<br><br>"
+                f"<strong>文件大小</strong><br>{html.escape(doc['size_display'])}<br><br>"
+                f"<strong>文件路徑</strong><br>{html.escape(str(rel))}<br><br>"
+                f"目前僅提供文件資訊預覽，PDF 內容解析將於 RAG 模組完成後支援。"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            if not exists:
+                st.caption("此檔案可能已被移動或刪除。")
+
+        path = Path(doc["path"])
+        if path.is_file():
+            try:
+                file_bytes = path.read_bytes()
+                st.download_button(
+                    label="下載文件",
+                    data=file_bytes,
+                    file_name=doc["name"],
+                    mime="application/pdf",
+                    key=f"dl_doc_{sk}",
+                    use_container_width=True,
+                )
+            except OSError as e:
+                st.caption(f"無法讀取檔案：{e}")
+        else:
+            st.caption("檔案不存在，無法下載。")
+
+        if st.button("🗑️ 刪除文件", key=f"btn_del_req_{sk}", use_container_width=True):
+            st.session_state[pending_key] = True
+
+        if st.session_state.get(pending_key):
+            st.markdown(
+                '<p class="doc-delete-warn">確定要刪除此文件嗎？<br>此操作無法復原。</p>',
+                unsafe_allow_html=True,
+            )
+            if st.button("確認刪除", key=f"btn_del_confirm_{sk}", use_container_width=True):
+                success, msg = delete_document(doc["path"])
+                if success:
+                    st.session_state.pop(pending_key, None)
+                    st.session_state.pop(preview_key, None)
+                    st.success(f"已刪除文件：{doc['name']}")
+                    st.rerun()
+                else:
+                    st.error(f"刪除失敗：{msg}")
+
+
+def render_source_library() -> None:
+    """Source Library：上傳 + 文件列表（含預覽、下載、刪除）。"""
+    docs = get_uploaded_documents()
+
+    st.markdown(
+        '<div class="doc-list-header">'
+        "<span>文件名稱</span><span>分類</span><span>大小</span><span>操作</span>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    if not docs:
+        st.markdown(
+            '<div class="glass-sm"><p class="subhead" style="margin:0">尚未上傳任何文件。</p></div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    for idx, doc in enumerate(docs):
+        safe_name = html.escape(doc["name"])
+        safe_cat = html.escape(doc["category"])
+        with st.container(border=True):
+            c1, c2, c3, c4 = st.columns([5, 2, 1.2, 1])
+            with c1:
+                st.markdown(f'<div class="doc-name">{safe_name}</div>', unsafe_allow_html=True)
+            with c2:
+                st.markdown(f'<div class="doc-meta">{safe_cat}</div>', unsafe_allow_html=True)
+            with c3:
+                st.markdown(
+                    f'<div class="doc-meta">{html.escape(doc["size_display"])}</div>',
+                    unsafe_allow_html=True,
+                )
+            with c4:
+                _render_doc_popover_actions(doc, idx)
+
+
 # ── UI: Data ─────────────────────────────────────────────────────────────────
 def page_data(p: dict) -> None:
     st.markdown('<p class="display-sm">Data</p>', unsafe_allow_html=True)
@@ -972,16 +1195,13 @@ def page_data(p: dict) -> None:
     files = st.file_uploader("上傳 PDF", type=["pdf"], accept_multiple_files=True, label_visibility="collapsed")
     if st.button("上傳", type="secondary") and files:
         folder = PDF_CATS[cat]
+        folder.mkdir(parents=True, exist_ok=True)
         for f in files:
             (folder / f.name).write_bytes(f.read())
         st.rerun()
-    rows = list_pdfs()
-    if rows:
-        st.dataframe(rows, use_container_width=True, hide_index=True, column_config={
-            "name": "文件名稱", "category": "分類", "size": "大小",
-        })
-    else:
-        st.markdown('<p class="caption">尚未上傳文件。</p>', unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    render_source_library()
 
     st.markdown('<p class="section-label">Knowledge Notes</p>', unsafe_allow_html=True)
     notes = load_notes()
