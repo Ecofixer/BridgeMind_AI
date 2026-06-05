@@ -979,6 +979,122 @@ def data_sufficient(p: dict, notes: str, pdfs: dict) -> bool:
     )
 
 
+# ── Design Boundary Status ────────────────────────────────────────────────────
+def get_boundary_status(
+    profile: dict | None,
+    notes: str = "",
+    pdfs: Any = None,
+    source_links: Any = None,
+) -> dict[str, str]:
+    """Design Boundary 五維狀態：Missing / Partial / Ready。"""
+    profile = profile or {}
+    notes = notes or ""
+    if not isinstance(notes, str):
+        notes = str(notes) if notes is not None else ""
+
+    if isinstance(pdfs, dict):
+        pdfs_cat: dict[str, list[str]] = pdfs
+        pdf_docs = _normalize_pdf_files(None)
+        if not pdf_docs:
+            pdf_docs = get_uploaded_documents()
+    else:
+        pdf_docs = _normalize_pdf_files(pdfs)
+        if not pdf_docs and pdfs is None:
+            pdf_docs = get_uploaded_documents()
+        pdfs_cat = {}
+        for doc in pdf_docs:
+            if not isinstance(doc, dict):
+                continue
+            cat = doc.get("category") or "其他資料"
+            pdfs_cat.setdefault(cat, []).append(doc.get("name") or "")
+
+    links = _normalize_source_links(source_links)
+
+    def has_cat(category: str) -> bool:
+        return _category_has_data(category, pdfs_cat, links)
+
+    def count_filled(fields: tuple[str, ...]) -> int:
+        return sum(1 for field in fields if not empty(profile.get(field)))
+
+    # Regulation
+    if has_cat("法規資料"):
+        regulation = "Ready"
+    elif any(kw in notes for kw in ("法規", "規範", "設計規範")):
+        regulation = "Partial"
+    else:
+        regulation = "Missing"
+
+    # Environment
+    has_env_source = has_cat("環評資料")
+    has_env_profile = not empty(profile.get("wetland")) or not empty(
+        profile.get("environment_constraints")
+    )
+    if has_env_source and has_env_profile:
+        environment = "Ready"
+    elif has_env_source or has_env_profile:
+        environment = "Partial"
+    else:
+        environment = "Missing"
+
+    # Site
+    site_fields = (
+        "river_width",
+        "soil_type",
+        "foundation_method",
+        "bridge_width_m",
+        "design_speed_kmh",
+    )
+    site_count = count_filled(site_fields)
+    if site_count >= 4:
+        site = "Ready"
+    elif site_count >= 2:
+        site = "Partial"
+    else:
+        site = "Missing"
+
+    # Cases
+    if has_cat("橋梁案例"):
+        cases = "Ready"
+    elif any(kw in notes for kw in ("案例", "橋梁案例")):
+        cases = "Partial"
+    else:
+        cases = "Missing"
+
+    # Engineering Demand
+    eng_fields = (
+        "bridge_type_goal",
+        "bridge_width_m",
+        "design_speed_kmh",
+        "road_lanes",
+        "bim_required_elements",
+    )
+    eng_count = count_filled(eng_fields)
+    if eng_count >= 4:
+        engineering_demand = "Ready"
+    elif eng_count >= 2:
+        engineering_demand = "Partial"
+    else:
+        engineering_demand = "Missing"
+
+    return {
+        "regulation": regulation,
+        "environment": environment,
+        "site": site,
+        "cases": cases,
+        "engineering_demand": engineering_demand,
+    }
+
+
+def boundary_ready(boundary_status: dict | None) -> bool:
+    """regulation / environment / site / engineering_demand 皆非 Missing 時為 True。"""
+    if not boundary_status or not isinstance(boundary_status, dict):
+        return False
+    for key in ("regulation", "environment", "site", "engineering_demand"):
+        if boundary_status.get(key) == "Missing":
+            return False
+    return True
+
+
 def project_readiness(
     profile: dict | None = None,
     notes: str = "",
