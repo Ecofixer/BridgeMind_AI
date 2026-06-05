@@ -2147,6 +2147,25 @@ def gen_design(
 ) -> tuple[str, dict]:
     profile = profile or {}
     notes = notes or ""
+
+    if callable(pdfs):
+        try:
+            pdfs = pdfs()
+        except Exception:
+            pdfs = []
+
+    if callable(source_links):
+        try:
+            source_links = source_links()
+        except Exception:
+            source_links = []
+
+    pdfs = pdfs or []
+    source_links = source_links or []
+
+    boundary_status = get_boundary_status(profile, notes, pdfs, source_links)
+    is_boundary_ready = boundary_ready(boundary_status)
+
     p, notes, pdfs_cat, pdf_docs, source_links, readiness_score, confidence, missing = _prep_analysis(
         profile, notes, pdfs, source_links
     )
@@ -2156,16 +2175,15 @@ def gen_design(
     design_keywords = safe_list(p.get("design_keywords"))
     bim_user = safe_list(p.get("bim_required_elements"))
 
-    boundary_status = get_boundary_status(p, notes, pdf_docs, source_links)
-    is_boundary_ready = boundary_ready(boundary_status)
-
     boundary_section = f"""## Boundary Status
 
-- Regulation Boundary: {boundary_status.get("regulation", "Missing")}
-- Environmental Boundary: {boundary_status.get("environment", "Missing")}
-- Site Boundary: {boundary_status.get("site", "Missing")}
-- Case Reference Boundary: {boundary_status.get("cases", "Missing")}
-- Engineering Demand Boundary: {boundary_status.get("engineering_demand", "Missing")}
+| 邊界項目 | 狀態 |
+|---|---|
+| Regulation Boundary | {boundary_status.get("regulation", "Missing")} |
+| Environmental Boundary | {boundary_status.get("environment", "Missing")} |
+| Site Boundary | {boundary_status.get("site", "Missing")} |
+| Case Reference Boundary | {boundary_status.get("cases", "Missing")} |
+| Engineering Demand Boundary | {boundary_status.get("engineering_demand", "Missing")} |
 """
 
     engineer_disclaimer = (
@@ -2201,6 +2219,18 @@ def gen_design(
     def bim_field(val: Any) -> Any:
         return val if has_value(val) else "尚未提供"
 
+    def bim_structural_params() -> dict[str, Any]:
+        """僅輸出 profile 中實際提供的結構參數，其餘填尚未提供或 null。"""
+        return {
+            "main_span_length": bim_field(p.get("main_span_length")),
+            "tower_height": bim_field(p.get("tower_height")),
+            "pier_count": bim_field(p.get("pier_count")),
+            "material_spec": bim_field(p.get("material_spec")),
+            "foundation_depth": bim_field(p.get("foundation_depth")),
+            "girder_dimensions": bim_field(p.get("girder_dimensions")),
+            "cable_count": bim_field(p.get("cable_count")),
+        }
+
     if not is_boundary_ready:
         md = f"""# 設計與 BIM 規劃
 
@@ -2211,7 +2241,9 @@ def gen_design(
 ## Design Decision
 
 目前尚無法可靠推薦單一橋型。
-因為法規、環境、基地或工程需求邊界尚未完整，現階段只適合建立候選橋型比較框架。
+可先建立候選橋型比較框架。
+
+原因是目前仍缺少部分設計邊界，橋型選擇需要先確認法規、環境、基地條件與工程需求，避免 AI 在沒有足夠依據下做出錯誤建議。
 
 ## 可先建立的 BIM 內容
 
@@ -2236,6 +2268,7 @@ def gen_design(
             "required_bim_components": bim_user if bim_user else "尚未提供",
             "bridge_width_m": bim_field(p.get("bridge_width_m")),
             "river_width": bim_field(p.get("river_width")),
+            "structural_parameters": bim_structural_params(),
             "status": "framework_only",
         }
     else:
@@ -2298,6 +2331,7 @@ def gen_design(
             "required_bim_components": bim_user if bim_user else "尚未提供",
             "bridge_width_m": bim_field(p.get("bridge_width_m")),
             "river_width": bim_field(p.get("river_width")),
+            "structural_parameters": bim_structural_params(),
             "status": "concept_ready" if rec else "preliminary",
         }
 
