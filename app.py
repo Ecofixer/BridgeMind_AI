@@ -1475,6 +1475,260 @@ def safe_generate_output(
 
 
 # ── Generators (Apple-style outputs) ─────────────────────────────────────────
+def gen_constraints(
+    profile: dict | None,
+    notes: str | None = None,
+    pdfs: Any = None,
+    source_links: Any = None,
+) -> str:
+    """Constraint Agent：依目前資料產生設計邊界摘要（僅回傳 markdown）。"""
+    profile = profile or {}
+    notes = notes or ""
+    pdfs = pdfs or []
+    source_links = source_links or []
+    if not isinstance(notes, str):
+        notes = str(notes) if notes is not None else ""
+
+    boundary_status = get_boundary_status(profile, notes, pdfs, source_links)
+    is_ready = boundary_ready(boundary_status)
+
+    if isinstance(pdfs, dict):
+        pdfs_cat: dict[str, list[str]] = pdfs
+        pdf_docs = _normalize_pdf_files(None)
+        if not pdf_docs:
+            pdf_docs = get_uploaded_documents()
+    else:
+        pdf_docs = _normalize_pdf_files(pdfs)
+        pdfs_cat = {}
+        for doc in pdf_docs:
+            if not isinstance(doc, dict):
+                continue
+            cat = doc.get("category") or "其他資料"
+            pdfs_cat.setdefault(cat, []).append(doc.get("name") or "")
+
+    links = source_links if isinstance(source_links, list) else _normalize_source_links(source_links)
+
+    def cat_sources(category: str) -> list[str]:
+        items: list[str] = []
+        for doc in pdf_docs:
+            if isinstance(doc, dict) and doc.get("category") == category:
+                items.append(f"- PDF：{safe_str(doc.get('name'))}")
+        for lnk in links:
+            if isinstance(lnk, dict) and lnk.get("category") == category:
+                title = safe_str(lnk.get("title"))
+                url = safe_str(lnk.get("url"), "")
+                items.append(f"- 網址：{title}" + (f"（{url}）" if url != "尚未提供" else ""))
+        return items
+
+    def note_has(*keywords: str) -> bool:
+        return any(kw in notes for kw in keywords)
+
+    # ── 二、法規與設計規範邊界 ──
+    reg_items = cat_sources("法規資料")
+    if note_has("法規", "規範", "設計規範"):
+        reg_items.append("- 知識筆記：提及法規或設計規範相關內容")
+    if boundary_status.get("regulation") == "Missing":
+        regulation_block = """目前尚未提供足夠的法規與設計規範資料。
+
+建議補充：
+- 公路橋梁設計規範
+- 公路路線設計規範
+- 河川治理或防洪相關規範
+- 水利署相關規範
+- 環評相關法規
+- 濕地保育相關法規"""
+    else:
+        regulation_block = "\n".join(reg_items) if reg_items else (
+            "目前尚未提供足夠的法規與設計規範資料。\n\n"
+            "建議補充：\n"
+            "- 公路橋梁設計規範\n"
+            "- 公路路線設計規範\n"
+            "- 河川治理或防洪相關規範\n"
+            "- 水利署相關規範\n"
+            "- 環評相關法規\n"
+            "- 濕地保育相關法規"
+        )
+
+    # ── 三、環境邊界 ──
+    env_topics = [
+        ("濕地", safe_str(profile.get("wetland"), "尚未提供")),
+        ("生態", safe_join(
+            [c for c in safe_list(profile.get("environment_constraints"))
+             if any(k in c for k in ("生態", "棲地", "物種"))],
+            "尚未提供",
+        )),
+        ("水質", safe_join(
+            [c for c in safe_list(profile.get("environment_constraints")) if "水質" in c],
+            "尚未提供",
+        )),
+        ("噪音", safe_join(
+            [c for c in safe_list(profile.get("environment_constraints")) if "噪音" in c],
+            "尚未提供",
+        )),
+        ("環評", (
+            "\n".join(cat_sources("環評資料"))
+            if cat_sources("環評資料")
+            else ("已於筆記提及" if note_has("環評") else "尚未提供")
+        )),
+        ("保育類動物", safe_join(
+            [c for c in safe_list(profile.get("environment_constraints"))
+             if any(k in c for k in ("保育", "動物", "鳥類"))],
+            "尚未提供",
+        )),
+        ("原生植栽", safe_join(
+            [c for c in safe_list(profile.get("environment_constraints")) if "植栽" in c],
+            "尚未提供",
+        )),
+        ("施工期間環境限制", safe_join(
+            [c for c in safe_list(profile.get("environment_constraints"))
+             if any(k in c for k in ("施工", "管制", "限制"))],
+            "尚未提供",
+        )),
+    ]
+    if boundary_status.get("environment") == "Missing":
+        environment_block = "目前尚未提供完整環境限制資料。"
+    else:
+        env_lines = [f"- {label}：{value}" for label, value in env_topics]
+        if safe_list(profile.get("environment_constraints")):
+            extras = [c for c in safe_list(profile.get("environment_constraints"))]
+            env_lines.append(f"- 其他環境限制：{safe_join(extras)}")
+        environment_block = "\n".join(env_lines)
+
+    # ── 四、基地與工程邊界 ──
+    site_map = [
+        ("河寬", profile.get("river_width")),
+        ("橋長", profile.get("bridge_length")),
+        ("地質", profile.get("soil_type")),
+        ("水文", profile.get("detention_volume_m3")),
+        ("設計速率", profile.get("design_speed_kmh")),
+        ("橋面寬度", profile.get("bridge_width_m")),
+        ("用地限制", safe_join(profile.get("route_strategy"))),
+        ("施工限制", safe_join(profile.get("engineering_constraints"))),
+        ("防洪需求", profile.get("foundation_method")),
+    ]
+    if boundary_status.get("site") == "Missing":
+        site_block = "目前尚未提供完整工程限制資料。"
+    else:
+        site_lines = []
+        for label, value in site_map:
+            if has_value(value):
+                site_lines.append(f"- {label}：{safe_str(value) if not isinstance(value, list) else safe_join(value)}")
+            else:
+                site_lines.append(f"- {label}：尚未提供")
+        site_block = "\n".join(site_lines)
+
+    # ── 五、不可違反條件 ──
+    inviolable: list[str] = []
+    if boundary_status.get("regulation") != "Missing":
+        inviolable.append("須符合已提供之法規與設計規範資料，不得逾越已知規範要求。")
+    for c in safe_list(profile.get("environment_constraints")):
+        inviolable.append(f"環境限制：{c}")
+    if has_value(profile.get("wetland")):
+        inviolable.append(f"濕地條件：{safe_str(profile.get('wetland'))}")
+    for c in safe_list(profile.get("engineering_constraints")):
+        inviolable.append(f"工程限制：{c}")
+    if has_value(profile.get("river_width")):
+        inviolable.append(f"河寬條件：{safe_str(profile.get('river_width'))}")
+    if has_value(profile.get("design_speed_kmh")):
+        inviolable.append(f"設計速率：{safe_str(profile.get('design_speed_kmh'))} km/h")
+    if has_value(profile.get("bridge_width_m")):
+        inviolable.append(f"橋面寬度：{safe_str(profile.get('bridge_width_m'))} m")
+
+    if not inviolable or boundary_status.get("regulation") == "Missing":
+        inviolable_block = """目前資料不足，尚無法建立完整不可違反條件。
+
+在正式設計前，至少應補充：
+
+- 法規與設計規範
+- 環評與環境限制
+- 河川與防洪條件
+- 地質與基礎資料
+- 路線與交通條件
+- 用地與施工限制"""
+    else:
+        inviolable_block = "\n".join(f"- {item}" for item in inviolable)
+
+    # ── 六、邊界狀態表 ──
+    status_table = f"""| 邊界項目 | 狀態 |
+|---|---|
+| 法規邊界 | {boundary_status.get('regulation', 'Missing')} |
+| 環境邊界 | {boundary_status.get('environment', 'Missing')} |
+| 基地邊界 | {boundary_status.get('site', 'Missing')} |
+| 案例基準 | {boundary_status.get('cases', 'Missing')} |
+| 工程需求 | {boundary_status.get('engineering_demand', 'Missing')} |"""
+
+    # ── 七、是否可以進入設計階段 ──
+    if not is_ready:
+        design_stage_block = """目前尚未形成完整設計邊界，不建議直接進入橋型定案。
+
+可以先建立：
+- 候選橋型比較框架
+- BIM 資料欄位架構
+- 初步設計需求清單
+- 後續資料補充清單"""
+    else:
+        design_stage_block = """目前已具備初步設計邊界，可進入橋型比較與 BIM 初步規劃。
+
+但仍須由專業工程師依正式規範複核。"""
+
+    return f"""# Constraint Agent｜設計邊界摘要
+
+## 一、為什麼要先建立設計邊界
+
+橋梁設計不能先發想橋型，再回頭檢查法規。
+
+正確流程應為：
+
+法規與規範 → 基地條件 → 限制條件 → 可行方案集合 → 設計比較。
+
+BridgeMind AI 的設計邏輯，是先建立工程、法規與環境邊界，再讓後續 Agent 在邊界內進行橋型比較、BIM 規劃與決策輸出。
+
+## 二、法規與設計規範邊界
+
+{regulation_block}
+
+## 三、環境邊界
+
+{environment_block}
+
+## 四、基地與工程邊界
+
+{site_block}
+
+## 五、不可違反條件
+
+{inviolable_block}
+
+## 六、目前設計邊界狀態
+
+{status_table}
+
+## 七、是否可以進入設計階段
+
+{design_stage_block}
+
+## 八、對後續 Agent 的約束
+
+Research Agent：
+先補齊缺少的法規、環評、可行性與案例資料。
+
+Engineering Agent：
+不得假設未提供的河寬、地質、基礎條件為已知。
+
+Environmental Agent：
+不得假設環境影響低，除非有環評或環境資料支持。
+
+Design & BIM Agent：
+不得強行推薦單一橋型，除非設計邊界足夠明確。
+
+Cost Agent：
+不得估算具體造價，除非有橋型、橋長、工法與主要構件資料。
+
+Report Agent：
+必須在報告中標示目前資料可信度與設計邊界完整度。
+"""
+
+
 def gen_recommendation(
     profile: dict | None,
     notes: str = "",
