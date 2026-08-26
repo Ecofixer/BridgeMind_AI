@@ -16,6 +16,10 @@ TASK_PREFIXES = (
     "請新增待辦", "请新增待办", "新增待辦", "新增待办", "建立任務", "建立任务",
     "加入待辦", "加入待办", "提醒我", "add task",
 )
+ACTION_PREFIXES = (
+    "建立提案", "新增提案", "建立動作提案", "建立动作提案",
+    "請執行", "请执行", "propose action",
+)
 WAKE_PHRASE_ALIASES = (
     WAKE_PHRASE.lower(),
     "hey uchen",
@@ -31,7 +35,7 @@ PRIVATE_SIGNALS = (
 )
 COMPANY_SIGNALS = (
     "公司", "company", "團隊", "团队", "員工", "员工", "營運", "运营",
-    "ecofixer ai os",
+    COMPANY_OS_NAME.lower(),
 )
 
 
@@ -95,6 +99,8 @@ def _extract_project(content: str) -> str | None:
         "founder + company ai",
         "founder company ai",
         "founder ai",
+        "company ai",
+        "公司 ai",
         "ai agent",
         "創辦人 ai",
         "创办人 ai",
@@ -138,6 +144,35 @@ def _infer_visibility(content: str, scope: Scope) -> Visibility:
     return Visibility.FOUNDER_ONLY
 
 
+def infer_action_risk(content: str) -> RiskLevel:
+    """Classify a proposed external action before approval is considered."""
+    lowered = content.lower()
+    prohibited = (
+        "刪除正式資料庫", "删除正式数据库", "delete production database",
+        "未授權付款", "未经授权付款", "unauthorized payment",
+        "bypass approval", "繞過批准", "绕过批准",
+    )
+    if any(token in lowered for token in prohibited):
+        return RiskLevel.PROHIBITED
+
+    approval_required = (
+        "merge", "合併", "合并", "send email", "發送郵件", "发送邮件",
+        "production", "正式環境", "正式环境", "付款", "payment", "權限", "权限",
+        "permission", "delete", "刪除", "删除", "publish", "公開發布", "公开发布",
+        "contract", "合約", "合同",
+    )
+    if any(token in lowered for token in approval_required):
+        return RiskLevel.APPROVAL_REQUIRED
+
+    reversible = (
+        "create branch", "建立 branch", "建立分支", "create issue", "建立 issue",
+        "create draft", "建立草稿", "建立待辦", "建立待办",
+    )
+    if any(token in lowered for token in reversible):
+        return RiskLevel.REVERSIBLE
+    return RiskLevel.DRAFT
+
+
 class CommandRouter:
     """Routes explicit local commands before a cloud model is considered."""
 
@@ -151,11 +186,7 @@ class CommandRouter:
             if not memory_content:
                 return Intent(name="invalid_memory")
             project = _extract_project(memory_content)
-            scope = _infer_scope(
-                memory_content,
-                project,
-                private_precedence=True,
-            )
+            scope = _infer_scope(memory_content, project, private_precedence=True)
             return Intent(
                 name="remember",
                 payload={
@@ -181,6 +212,22 @@ class CommandRouter:
                     "project": project,
                 },
                 risk_level=RiskLevel.REVERSIBLE,
+            )
+
+        action_content = _clean_after_prefix(normalized, ACTION_PREFIXES)
+        if action_content is not None:
+            if not action_content:
+                return Intent(name="invalid_action")
+            risk_level = infer_action_risk(action_content)
+            return Intent(
+                name="create_action_request",
+                payload={
+                    "title": action_content[:120],
+                    "description": action_content,
+                    "risk_level": risk_level,
+                    "payload": {"requested_text": action_content},
+                },
+                risk_level=risk_level,
             )
 
         lowered = normalized.lower()
