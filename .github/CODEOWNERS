@@ -1,0 +1,9 @@
+# Default owner for all source, configuration, security, and documentation changes.
+* @Ecofixer
+
+/.github/ @Ecofixer
+/docs/ @Ecofixer
+/founder_company_ai/ @Ecofixer
+/app.py @Ecofixer
+/pyproject.toml @Ecofixer
+/requirements*.txt @Ecofixer
