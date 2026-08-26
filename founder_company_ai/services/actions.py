@@ -50,7 +50,7 @@ class ActionService:
 
         if intent.name == "daily_briefing":
             open_tasks = [
-                task for task in self.store.list_tasks(limit=20)
+                task for task in self.store.list_tasks(limit=50)
                 if task.status is not TaskStatus.DONE
             ]
             recent_memories = self.store.list_memories(limit=5)
@@ -97,6 +97,29 @@ class ActionService:
                 lines.append(
                     f"- **{memory.scope.value}/{memory.category.value}** · "
                     f"{memory.content}{project}"
+                )
+            return "\n".join(lines)
+
+        if intent.name == "list_tasks":
+            open_tasks = [
+                task for task in self.store.list_tasks(limit=100)
+                if task.status is not TaskStatus.DONE
+            ]
+            self.store.log_activity(
+                action_type="task.listed",
+                summary="Listed open tasks.",
+                risk_level=RiskLevel.READ_ONLY,
+                details={"count": len(open_tasks)},
+            )
+            if not open_tasks:
+                return "目前沒有未完成待辦。"
+            lines = ["### 未完成待辦"]
+            for task in open_tasks:
+                project = f" · {task.project}" if task.project else ""
+                approval = " · 需創辦人批准" if task.approval_required else ""
+                lines.append(
+                    f"- **P{task.priority} · {task.status.value}** · "
+                    f"{task.title}{project}{approval}"
                 )
             return "\n".join(lines)
 
