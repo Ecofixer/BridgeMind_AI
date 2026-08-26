@@ -1,115 +1,44 @@
-# Founder + Company AI — Security and Permissions
+# Security and Permission Model
 
-## 1. Non-negotiable boundary
+## Non-negotiable boundary
 
-Founder-private memory and company-visible memory are different security domains.
+Youchen AI OS private data and EcoFixer AI OS company-visible data are separate security domains. A future employee account must not retrieve Founder-only records through UI navigation, search, model context, exports, logs, analytics, database access, or tool calls.
 
-A future employee account must not be able to retrieve founder-only rows through:
+V1 enforces two data-layer invariants:
 
-- UI navigation
-- search
-- model context assembly
-- exports
-- logs
-- analytics
-- direct database access
-- tool calls
+- Founder profile context must be `founder_only`.
+- Founder-scoped memory must be `founder_only`.
 
-V1 is founder-only. The visibility field is stored now so later multi-user work begins with an explicit data model rather than retrofitting privacy.
-
-## 2. Authority levels
+## Authority levels
 
 | Level | Meaning | Examples |
 |---|---|---|
-| 0 — Read only | No state change | read memory, inspect repository |
-| 1 — Draft | Creates an unsubmitted artifact | draft email, draft plan |
-| 2 — Reversible | Safe mutation with audit | create task, create branch |
-| 3 — Approval required | Material external action | send email, merge, production change, payment |
-| 4 — Prohibited | Never execute | unauthorized payment, destructive production deletion |
+| Read only | No state change | inspect memory, repository, or schedule |
+| Draft | Creates an unsubmitted artifact | draft email or plan |
+| Reversible | Audited recoverable mutation | create task or branch |
+| Approval required | Material external action | send email, merge, production change, payment |
+| Prohibited | Never execute | unauthorized payment or destructive production deletion |
 
-V1 implements Levels 0 and 2 locally. It does not expose external tools.
+## Approval requirements
 
-## 3. Approval rules
+Approval must be explicit, action-specific, recent, tied to exact arguments, invalidated when material arguments change, and recorded in the audit log.
 
-Approval must be:
+A broad instruction such as “handle everything” never authorizes payments, legal acceptance, permission escalation, production deletion, or public publishing.
 
-- explicit
-- action-specific
-- recent
-- tied to exact arguments
-- invalidated when material arguments change
-- written to the audit log
+In V1, approval changes only proposal state. It does not execute an external operation.
 
-A generic statement such as “handle everything” must not authorize payments, production deletion, permission escalation, legal acceptance, or public publishing.
+## Cloud context
 
-## 4. Data handling
+Structured profile, memory, and tasks remain local by default. Local commands and their responses are marked as not cloud-eligible. Enabling `FOUNDER_AI_ALLOW_CLOUD_MEMORY_CONTEXT=true` is an explicit opt-in.
 
-### Source control
+The OpenAI provider uses `store=False`, but the company must still review provider settings, retention, redaction, and data-processing obligations before confidential deployment.
 
-Never commit:
+## Voice privacy
 
-- API keys
-- database files
-- audio recordings
-- conversation exports
-- founder notes
-- customer information
-- contracts
-- financial records
-- production credentials
+Audio is submitted for transcription only after the founder presses the execution button. The “Hey Youchen” phrase is an intended future local wake phrase, not proof of identity and not approval.
 
-### Local runtime
+Always-on listening remains prohibited until the product has visible listening state, consent rules, stop control, accidental-capture protection, retention policy, and battery/network limits.
 
-V1 stores runtime data under `.local/`.
+## Public history warning
 
-Before deployment:
-
-- encrypt storage at rest
-- establish backups
-- define retention
-- add authenticated access
-- add per-user authorization tests
-- centralize secrets
-- remove technical error details from end-user responses
-
-### Cloud model context
-
-Cloud memory context is off by default.
-
-Before enabling it, define:
-
-- which scopes can be sent
-- which categories are prohibited
-- redaction rules
-- provider retention settings
-- audit of context selection
-- user consent and company policy
-
-## 5. Voice privacy
-
-V1 sends recorded audio for transcription only when the founder presses the submit button.
-
-Always-on listening is prohibited until the product has:
-
-- visible listening state
-- hardware/OS permission handling
-- local stop control
-- interruption behavior
-- retention policy
-- accidental-capture protection
-- battery and network limits
-- clear workplace consent rules
-
-## 6. Repository hardening checklist
-
-- [ ] Rename repository to the final product name
-- [ ] Make repository private
-- [ ] Remove public deployment links
-- [ ] Enable secret scanning
-- [ ] Enable protected branches
-- [ ] Require pull-request review
-- [ ] Add dependency update automation
-- [ ] Add CI tests
-- [ ] Add static analysis
-- [ ] Add an incident response contact
-- [ ] Verify no historical secrets exist
+The repository is currently public. New proprietary licensing does not revoke rights already granted under historical public licenses. Do not add confidential data until the repository is private and its history has been reviewed.

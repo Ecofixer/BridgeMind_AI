@@ -1,51 +1,28 @@
-# Founder + Company AI
+# Youchen AI OS + EcoFixer AI OS
 
-A private AI operating assistant built for one founder and the company around them.
+A private AI operating system for one founder and the company around them.
 
-> **Security status:** the GitHub repository is still public and still uses its legacy repository name. Do not add real founder, company, customer, financial, or credential data until the repository is renamed, made private, and protected.
+The product has **one AI core** and two protected operating spaces:
 
-The product has one entry point and two protected context domains:
+- **Youchen AI OS** — founder-private preferences, schedule, decisions, notes, priorities, and personal work.
+- **EcoFixer AI OS** — company products, projects, operations, approved documents, tasks, and tools.
 
-- **Founder context** — personal preferences, decisions, schedule, private notes, and priorities.
-- **Company context** — products, projects, tasks, operating decisions, documents, and approved tools.
+The intended voice wake phrase is **“Hey Youchen.”** A wake phrase starts a voice interaction; it never authorizes a high-risk action.
 
-It is designed to **listen, understand, remember, plan, act within permission, and report**. It is not a collection of branded sub-agents and it is not a generic chatbot.
+## What V1 can do
 
-## V1 included in this branch
+- text chat with local safe mode
+- push-to-talk voice recording and transcription
+- structured Founder, Company, and Project context
+- scoped memory with category, visibility, and project fields
+- task tracking and daily Founder Briefing
+- action proposals with approval, rejection, and prohibited states
+- complete local activity and audit records
+- optional OpenAI Responses API integration
+- cloud structured-memory context disabled by default
+- migration of existing local message databases
 
-- Founder + Company chat workspace
-- Push-to-talk voice recording and transcription
-- Local SQLite memory with scope, category, visibility, and project fields
-- Local task tracking
-- Activity and audit log
-- Direct commands for remembering decisions and creating or listing tasks
-- Daily founder briefing
-- Optional OpenAI Responses API integration
-- Cloud-memory sharing disabled by default
-- API response storage disabled for generated chat requests
-- No automatic merge, payment, production, permission, or destructive actions
-
-## Product model
-
-```text
-Founder
-  |
-  v
-Founder + Company AI
-  |
-  +-- Conversation
-  +-- Voice
-  +-- Context Router
-  +-- Founder Memory
-  +-- Company Memory
-  +-- Project Memory
-  +-- Task and Action Layer
-  +-- Permission Policy
-  +-- Audit Log
-  |
-  v
-Approved tools and real actions
-```
+V1 does **not** automatically merge code, send email, change production, alter permissions, publish content, accept contracts, or make payments.
 
 ## Run locally
 
@@ -57,47 +34,52 @@ cp .env.example .env
 streamlit run app.py
 ```
 
-Without `OPENAI_API_KEY`, the app runs in local safe mode. Memory, tasks, activity, and direct commands still work. Generative chat and speech transcription require the API key.
+Without `OPENAI_API_KEY`, the system runs in local safe mode. Context, memory, tasks, proposals, activity, wake acknowledgement, and briefings still work.
 
-Useful direct commands:
+Try:
 
 ```text
-記住：公司 AI 不可以讓其他員工看到創辦人的私人記憶
-新增待辦：完成 Founder + Company AI 權限模型
+Hey Youchen
+記住：公司 AI 不可以讓員工看到我的私人長期記憶
+記住：EcoFixer 的金額與抽成比例必須可以調整，UI 先保留位置
+新增待辦：完成 EcoFixer iOS 權限測試
+建立提案：Merge 修正完成的 PR
 今天公司有什麼事情？
-列出記憶
-列出待辦
 ```
 
-## Safety defaults
+## Privacy and authority defaults
 
-1. Runtime data is written under `.local/` and excluded from Git.
-2. No secret or personal/company memory belongs in source control.
-3. Founder-only memory is represented separately from company-visible memory.
-4. Cloud memory context is opt-in through `FOUNDER_AI_ALLOW_CLOUD_MEMORY_CONTEXT=true`.
-5. Generated Responses API requests explicitly set `store=False`.
-6. V1 does not execute external side effects.
-7. Every local action and cloud-chat outcome is written to the activity log.
+1. Founder context and Founder memory are forced to `founder_only` in the data layer.
+2. Local commands are marked as not cloud-eligible.
+3. Structured profile, memory, and tasks enter model context only when `FOUNDER_AI_ALLOW_CLOUD_MEMORY_CONTEXT=true`.
+4. OpenAI requests use `store=False`.
+5. Approving a proposal changes authorization state only; it does not claim external execution.
+6. Prohibited actions cannot be approved.
+7. Every local mutation and approval decision creates an audit record.
+8. Runtime databases and audio files are excluded from Git.
 
-## Important repository action
+## Repository hardening required
 
-Before adding real founder or company data:
+This repository is still publicly visible under its legacy repository name. Do not store real founder secrets, customer information, contracts, financial data, or production credentials until the repository is renamed, made private, and its public history is reviewed.
 
-1. Rename the repository to the final product name.
-2. Make the repository private.
-3. Enable branch protection and secret scanning.
-4. Store API keys only in environment variables or a secret manager.
-5. Review the security model in `docs/SECURITY.md`.
+Changing the license for new code does not revoke rights already granted by licenses attached to historical public commits.
 
 ## Documentation
 
-- `docs/PRODUCT_V1.md` — detailed product behavior and acceptance criteria
-- `docs/ARCHITECTURE.md` — system layers and code boundaries
-- `docs/SECURITY.md` — privacy, permissions, risk levels, and audit rules
-- `docs/ROADMAP.md` — staged path from local assistant to company operating system
+- `docs/PRODUCT_V1.md` — original V1 product definition
+- `docs/ARCHITECTURE.md` — architecture and provider boundaries
+- `docs/SECURITY.md` — security and permission model
+- `docs/ROADMAP.md` — staged path to a company operating system
+- `docs/COMPLETION_V1.md` — features added in the completion branch
+- `docs/REPLACEMENT_PLAN.md` — safe separation from the previous prototype
 
-## Status
+## Validation
 
-This is a **V1 foundation**, not the finished autonomous company system. It intentionally starts with local memory, safe chat, push-to-talk voice, tasks, and auditability. External tools are added only after their permission and approval contracts are defined.
+```bash
+python -m compileall -q founder_company_ai app.py
+python -m pytest
+```
+
+The completion branch currently contains 24 automated tests covering routing, voice identity, privacy invariants, migration, persistence, action approvals, prohibited operations, cloud-context selection, and Founder Briefing.
 
 Copyright © 2026 EcoFixer. All rights reserved.

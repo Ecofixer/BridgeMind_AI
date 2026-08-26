@@ -4,17 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "founder-company-ai"
-version = "0.1.0"
+version = "0.2.0"
 description = "A private founder and company AI operating assistant."
 requires-python = ">=3.10"
 dependencies = [
-  "streamlit>=1.52,<2",
-  "openai>=3.2,<4",
+  "streamlit>=1.40,<2",
+  "openai>=1.66,<4",
   "python-dotenv>=1.0,<2",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<9"]
+dev = ["pytest>=8,<10"]
 
 [tool.setuptools.packages.find]
 include = ["founder_company_ai*"]
