@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from founder_company_ai.branding import COMPANY_OS_NAME, PERSONAL_OS_NAME, WAKE_PHRASE
 from founder_company_ai.models import Intent, MemoryCategory, RiskLevel, Scope, Visibility
 
 
@@ -15,6 +16,13 @@ TASK_PREFIXES = (
     "請新增待辦", "请新增待办", "新增待辦", "新增待办", "建立任務", "建立任务",
     "加入待辦", "加入待办", "提醒我", "add task",
 )
+WAKE_PHRASE_ALIASES = (
+    WAKE_PHRASE.lower(),
+    "hey uchen",
+    "hey you chen",
+    "嘿 youchen",
+    "嗨 youchen",
+)
 PRIVATE_SIGNALS = (
     "只有我", "私人", "私密", "創辦人", "创办人", "我本人", "founder-only",
     "不可公開", "不得公開", "不能公開", "不可以公開", "不可分享", "不得分享",
@@ -23,7 +31,18 @@ PRIVATE_SIGNALS = (
 )
 COMPANY_SIGNALS = (
     "公司", "company", "團隊", "团队", "員工", "员工", "營運", "运营",
+    "ecofixer ai os",
 )
+
+
+def _strip_wake_phrase(text: str) -> str:
+    """Remove a leading wake phrase after the local wake-word engine activates."""
+    stripped = text.strip()
+    lowered = stripped.lower()
+    for phrase in WAKE_PHRASE_ALIASES:
+        if lowered.startswith(phrase):
+            return stripped[len(phrase):].lstrip(" ：:，,。.!！?？")
+    return stripped
 
 
 def _clean_after_prefix(text: str, prefixes: tuple[str, ...]) -> str | None:
@@ -62,13 +81,25 @@ def _infer_category(content: str) -> MemoryCategory:
 
 def _extract_project(content: str) -> str | None:
     lowered = content.lower()
-    if "ecofixer" in lowered or "易修繕" in content or "易修缮" in content:
-        return "EcoFixer"
+    if (
+        "ecofixer" in lowered
+        or "易修繕" in content
+        or "易修缮" in content
+        or COMPANY_OS_NAME.lower() in lowered
+    ):
+        return COMPANY_OS_NAME
     if any(token in lowered for token in (
-        "founder + company ai", "founder company ai", "founder ai", "company ai",
-        "ai agent", "公司 ai", "公司ai", "創辦人 ai", "创办人 ai",
+        PERSONAL_OS_NAME.lower(),
+        "youchen ai",
+        "uchen ai",
+        "founder + company ai",
+        "founder company ai",
+        "founder ai",
+        "ai agent",
+        "創辦人 ai",
+        "创办人 ai",
     )):
-        return "Founder + Company AI"
+        return PERSONAL_OS_NAME
     match = re.search(
         r"(?:專案|项目|project)\s*[:：]?\s*([A-Za-z0-9][A-Za-z0-9 _+\-]{1,50})",
         content,
@@ -84,6 +115,8 @@ def _infer_scope(
     private_precedence: bool = False,
 ) -> Scope:
     if private_precedence and _contains_private_signal(content):
+        return Scope.FOUNDER
+    if project == PERSONAL_OS_NAME:
         return Scope.FOUNDER
     if project:
         return Scope.PROJECT
@@ -109,9 +142,9 @@ class CommandRouter:
     """Routes explicit local commands before a cloud model is considered."""
 
     def route(self, text: str) -> Intent:
-        normalized = text.strip()
+        normalized = _strip_wake_phrase(text)
         if not normalized:
-            return Intent(name="empty")
+            return Intent(name="wake_acknowledgement", confidence=1.0)
 
         memory_content = _clean_after_prefix(normalized, REMEMBER_PREFIXES)
         if memory_content is not None:
