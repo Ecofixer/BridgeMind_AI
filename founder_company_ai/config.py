@@ -34,6 +34,7 @@ class Settings:
     transcribe_model: str
     allow_cloud_memory_context: bool
     default_conversation_id: str
+    timezone: str
 
     @classmethod
     def from_env(cls, root_dir: Path | None = None) -> "Settings":
@@ -63,4 +64,5 @@ class Settings:
                 os.getenv("FOUNDER_AI_DEFAULT_CONVERSATION_ID", "founder-main").strip()
                 or "founder-main"
             ),
+            timezone=os.getenv("FOUNDER_AI_TIMEZONE", "Asia/Taipei").strip() or "Asia/Taipei",
         )
