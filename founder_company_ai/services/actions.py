@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from founder_company_ai.branding import COMPANY_OS_NAME, PERSONAL_OS_NAME, WAKE_PHRASE
 from founder_company_ai.models import Intent, RiskLevel, TaskStatus
 from founder_company_ai.storage import SQLiteStore
 
@@ -13,6 +14,14 @@ class ActionService:
         self.store = store
 
     def execute(self, intent: Intent) -> str:
+        if intent.name == "wake_acknowledgement":
+            self.store.log_activity(
+                action_type="voice.wake_detected",
+                summary=f"Detected local wake phrase: {WAKE_PHRASE}",
+                risk_level=RiskLevel.READ_ONLY,
+            )
+            return f"我在。這裡是 {PERSONAL_OS_NAME}。你要處理個人事項，還是進入 {COMPANY_OS_NAME}？"
+
         if intent.name == "remember":
             record = self.store.add_memory(**intent.payload)
             self.store.log_activity(
@@ -68,7 +77,7 @@ class ActionService:
                     "目前沒有已記錄的待辦或近期決策。"
                     "你可以說「新增待辦：……」或「記住：……」開始建立公司脈絡。"
                 )
-            lines = ["### 今日 Founder Briefing"]
+            lines = [f"### 今日 {PERSONAL_OS_NAME} Briefing"]
             if open_tasks:
                 lines.append(f"\n**未完成事項：{len(open_tasks)} 項**")
                 for task in open_tasks[:8]:
