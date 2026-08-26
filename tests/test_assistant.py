@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from founder_company_ai.assistant import FounderCompanyAssistant
+from founder_company_ai.branding import COMPANY_OS_NAME, PERSONAL_OS_NAME
 from founder_company_ai.models import MemoryCategory
 from founder_company_ai.router import CommandRouter
 from founder_company_ai.services.actions import ActionService
@@ -45,6 +46,19 @@ def test_local_memory_command_is_executed(tmp_path: Path) -> None:
     assert len(store.list_messages("founder-main")) == 2
 
 
+def test_wake_phrase_returns_branded_acknowledgement(tmp_path: Path) -> None:
+    assistant, store = build_assistant(tmp_path)
+
+    reply = assistant.handle(
+        message="Hey Youchen",
+        conversation_id="founder-main",
+    )
+
+    assert PERSONAL_OS_NAME in reply
+    assert COMPANY_OS_NAME in reply
+    assert store.list_activity()[0].action_type == "voice.wake_detected"
+
+
 def test_safe_mode_explains_provider_requirement(tmp_path: Path) -> None:
     assistant, _ = build_assistant(tmp_path)
     reply = assistant.handle(
@@ -52,6 +66,7 @@ def test_safe_mode_explains_provider_requirement(tmp_path: Path) -> None:
         conversation_id="founder-main",
     )
 
+    assert PERSONAL_OS_NAME in reply
     assert "本機安全模式" in reply
     assert "OPENAI_API_KEY" in reply
 
