@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Founder + Company AI Streamlit application."""
+"""Youchen AI OS and EcoFixer AI OS Streamlit application."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import streamlit as st
 
 from founder_company_ai.assistant import FounderCompanyAssistant
+from founder_company_ai.branding import COMPANY_OS_NAME, PERSONAL_OS_NAME, WAKE_PHRASE
 from founder_company_ai.config import Settings
 from founder_company_ai.models import (
     MemoryCategory,
@@ -112,7 +113,7 @@ def page_header(title: str, subtitle: str) -> None:
     st.markdown(
         f"""
         <div class="hero">
-          <div class="eyebrow">Private AI Operating Assistant</div>
+          <div class="eyebrow">Youchen AI OS · Private Founder Interface</div>
           <h1>{safe(title)}</h1>
           <div class="muted">{safe(subtitle)}</div>
         </div>
@@ -123,8 +124,8 @@ def page_header(title: str, subtitle: str) -> None:
 
 def render_home(runtime: Runtime) -> None:
     page_header(
-        "Founder + Company AI",
-        "一個入口，同時理解創辦人與公司；先安全地記住、整理、追蹤，再逐步連接真實工具。",
+        PERSONAL_OS_NAME,
+        f"你的私人 AI 作業系統；公司工作自動進入 {COMPANY_OS_NAME}，兩邊記憶與權限分離。",
     )
     counts = runtime.store.counts()
     provider_status = "AI 已連線" if runtime.provider else "本機安全模式"
@@ -133,6 +134,10 @@ def render_home(runtime: Runtime) -> None:
     columns[1].metric("未完成事項", counts["open_tasks"])
     columns[2].metric("活動紀錄", counts["activities"])
     columns[3].metric("模式", provider_status)
+
+    st.caption(
+        f"預定本機喚醒詞：`{WAKE_PHRASE}`。目前 V1 使用按鍵式語音；背景常駐喚醒屬下一階段。"
+    )
 
     if runtime.provider is None:
         st.info(
@@ -198,10 +203,11 @@ def _send_chat(runtime: Runtime, text: str) -> None:
 def render_chat(runtime: Runtime) -> None:
     page_header(
         "Chat",
-        "用自然語言交代目標；明確的記憶與待辦指令會先在本機安全執行。",
+        f"對 {PERSONAL_OS_NAME} 交代目標；公司內容會路由到 {COMPANY_OS_NAME}。",
     )
     st.caption(
-        "直接指令：`記住：……`、`新增待辦：……`、`今天公司有什麼事情？`、`列出記憶`"
+        "直接指令：`記住：……`、`新增待辦：……`、`今天公司有什麼事情？`、"
+        "`列出記憶`、`列出待辦`"
     )
 
     messages = runtime.store.list_messages(
@@ -211,8 +217,8 @@ def render_chat(runtime: Runtime) -> None:
     if not messages:
         with st.chat_message("assistant"):
             st.markdown(
-                "我是你的 Founder + Company AI。你可以先告訴我一項公司規則、"
-                "一個產品決策，或今天需要完成的事情。"
+                f"我是 {PERSONAL_OS_NAME}。你可以處理私人事項，或直接交代 "
+                f"{COMPANY_OS_NAME} 的公司工作。"
             )
     else:
         for message in messages:
@@ -220,6 +226,9 @@ def render_chat(runtime: Runtime) -> None:
                 st.markdown(message.content)
 
     with st.expander("語音控制（按鍵式）", expanded=False):
+        st.caption(
+            f"目前先按鍵錄音。下一階段會加入本機常駐喚醒詞 `{WAKE_PHRASE}`、VAD 與語音回覆。"
+        )
         if runtime.provider is None:
             st.caption("語音錄製可用；語音轉錄需要設定 API key。")
         voice = st.audio_input(
@@ -254,7 +263,7 @@ def render_chat(runtime: Runtime) -> None:
         if st.session_state.get("last_transcript"):
             st.caption(f"上次語音：{st.session_state.last_transcript}")
 
-    prompt = st.chat_input("跟你的 AI 說話…")
+    prompt = st.chat_input(f"跟 {PERSONAL_OS_NAME} 說話…")
     if prompt:
         _send_chat(runtime, prompt)
         st.rerun()
@@ -263,7 +272,7 @@ def render_chat(runtime: Runtime) -> None:
 def render_memory(runtime: Runtime) -> None:
     page_header(
         "Memory",
-        "個人、公司與專案記憶分開保存，並明確標示可見範圍。",
+        f"{PERSONAL_OS_NAME}、{COMPANY_OS_NAME} 與專案記憶分開保存。",
     )
     with st.form("add_memory", clear_on_submit=True):
         content = st.text_area("內容", placeholder="例如：金額與抽成比例必須可調整，UI 先保留位置。")
@@ -439,6 +448,16 @@ def render_settings(runtime: Runtime) -> None:
         "Settings",
         "模型可以更換；資料邊界、權限與稽核規則不能依賴模型自己決定。",
     )
+    st.subheader("Identity")
+    st.write(
+        {
+            "personal_os": PERSONAL_OS_NAME,
+            "company_os": COMPANY_OS_NAME,
+            "wake_phrase": WAKE_PHRASE,
+            "always_on_wake_word": "planned",
+        }
+    )
+
     st.subheader("AI Provider")
     st.write(
         {
@@ -482,7 +501,7 @@ def render_settings(runtime: Runtime) -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="Founder + Company AI",
+        page_title=PERSONAL_OS_NAME,
         page_icon="◆",
         layout="wide",
         initial_sidebar_state="expanded",
@@ -491,14 +510,18 @@ def main() -> None:
     runtime = build_runtime()
 
     with st.sidebar:
-        st.title("Founder AI")
-        st.caption("Private · Company-aware · Auditable")
+        st.title(PERSONAL_OS_NAME)
+        st.caption(f"Company workspace · {COMPANY_OS_NAME}")
         page = st.radio(
             "Navigation",
             ["Home", "Chat", "Memory", "Tasks", "Activity", "Settings"],
             label_visibility="collapsed",
         )
         st.divider()
+        st.markdown(
+            f'<span class="badge safe">Wake: {safe(WAKE_PHRASE)}</span>',
+            unsafe_allow_html=True,
+        )
         if runtime.provider:
             st.markdown('<span class="badge safe">AI connected</span>', unsafe_allow_html=True)
         else:
