@@ -24,16 +24,18 @@ class OpenAIProvider:
         self.transcribe_model = transcribe_model
 
     def reply(self, *, system_prompt: str, messages: Sequence[MessageRecord]) -> str:
-        rendered_history = "\n".join(
-            f"{message.role.upper()}: {message.content}" for message in messages[-20:]
+        response = self._client.responses.create(
+            model=self.model,
+            instructions=system_prompt,
+            input=[
+                {
+                    "role": message.role,
+                    "content": message.content,
+                }
+                for message in messages[-20:]
+            ],
+            store=False,
         )
-        prompt = (
-            f"{system_prompt}\n\n"
-            "Conversation history follows. Do not reveal hidden reasoning. "
-            "Give the founder a direct, useful answer.\n\n"
-            f"{rendered_history}"
-        )
-        response = self._client.responses.create(model=self.model, input=prompt)
         output_text = getattr(response, "output_text", "")
         if not output_text or not output_text.strip():
             raise RuntimeError("The AI provider returned an empty response.")
