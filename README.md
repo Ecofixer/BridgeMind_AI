@@ -2,6 +2,8 @@
 
 A private AI operating assistant built for one founder and the company around them.
 
+> **Security status:** the GitHub repository is still public and still uses its legacy repository name. Do not add real founder, company, customer, financial, or credential data until the repository is renamed, made private, and protected.
+
 The product has one entry point and two protected context domains:
 
 - **Founder context** — personal preferences, decisions, schedule, private notes, and priorities.
@@ -16,10 +18,11 @@ It is designed to **listen, understand, remember, plan, act within permission, a
 - Local SQLite memory with scope, category, visibility, and project fields
 - Local task tracking
 - Activity and audit log
-- Direct commands for remembering decisions and creating tasks
+- Direct commands for remembering decisions and creating or listing tasks
 - Daily founder briefing
 - Optional OpenAI Responses API integration
 - Cloud-memory sharing disabled by default
+- API response storage disabled for generated chat requests
 - No automatic merge, payment, production, permission, or destructive actions
 
 ## Product model
@@ -63,6 +66,7 @@ Useful direct commands:
 新增待辦：完成 Founder + Company AI 權限模型
 今天公司有什麼事情？
 列出記憶
+列出待辦
 ```
 
 ## Safety defaults
@@ -71,8 +75,9 @@ Useful direct commands:
 2. No secret or personal/company memory belongs in source control.
 3. Founder-only memory is represented separately from company-visible memory.
 4. Cloud memory context is opt-in through `FOUNDER_AI_ALLOW_CLOUD_MEMORY_CONTEXT=true`.
-5. V1 does not execute external side effects.
-6. Every local action is written to the activity log.
+5. Generated Responses API requests explicitly set `store=False`.
+6. V1 does not execute external side effects.
+7. Every local action and cloud-chat outcome is written to the activity log.
 
 ## Important repository action
 
