@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from founder_company_ai.models import RiskLevel
 from founder_company_ai.providers.base import AIProvider
 from founder_company_ai.router import CommandRouter
 from founder_company_ai.services.actions import ActionService
@@ -83,7 +84,11 @@ class FounderCompanyAssistant:
         if not normalized:
             return "請輸入一個問題或任務。"
 
-        self.store.add_message(conversation_id=conversation_id, role="user", content=normalized)
+        self.store.add_message(
+            conversation_id=conversation_id,
+            role="user",
+            content=normalized,
+        )
         intent = self.router.route(normalized)
 
         if intent.name != "chat":
@@ -95,7 +100,8 @@ class FounderCompanyAssistant:
                 "可直接試：\n"
                 "- `記住：公司 AI 不可以讓員工看到創辦人的私人記憶`\n"
                 "- `新增待辦：完成權限模型`\n"
-                "- `今天公司有什麼事情？`"
+                "- `今天公司有什麼事情？`\n"
+                "- `列出待辦`"
             )
         else:
             try:
@@ -104,11 +110,31 @@ class FounderCompanyAssistant:
                     system_prompt=self._context_prompt(),
                     messages=history,
                 )
+                self.store.log_activity(
+                    action_type="chat.completed",
+                    summary="Generated a cloud AI response.",
+                    risk_level=RiskLevel.READ_ONLY,
+                    details={"conversation_id": conversation_id},
+                )
             except Exception as exc:
+                self.store.log_activity(
+                    action_type="chat.failed",
+                    summary="Cloud AI response failed.",
+                    risk_level=RiskLevel.READ_ONLY,
+                    status="failed",
+                    details={
+                        "conversation_id": conversation_id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
                 reply = (
-                    "AI 對話服務目前無法完成請求，但本機記憶與待辦仍可使用。"
-                    f"\n\n技術訊息：`{type(exc).__name__}: {exc}`"
+                    "AI 對話服務目前無法完成請求，但本機記憶、待辦與活動紀錄仍可使用。"
+                    "請稍後重試，或先用直接指令繼續工作。"
                 )
 
-        self.store.add_message(conversation_id=conversation_id, role="assistant", content=reply)
+        self.store.add_message(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=reply,
+        )
         return reply
