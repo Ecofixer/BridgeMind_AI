@@ -37,8 +37,10 @@ PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 
+# Only uppercase environment-style assignments are considered here. Python fields such as
+# `openai_api_key: str | None` or local variables must not be treated as embedded secrets.
 ASSIGNMENT = re.compile(
-    r"(?im)^\s*([A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PRIVATE_KEY|API_KEY)[A-Z0-9_]*)"
+    r"(?m)^\s*([A-Z][A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PRIVATE_KEY|API_KEY)[A-Z0-9_]*)"
     r"\s*=\s*['\"]?([^'\"#\r\n]*)"
 )
 PLACEHOLDERS = {
