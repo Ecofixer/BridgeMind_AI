@@ -3,9 +3,9 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "founder-company-ai"
+name = "youchen-ecofixer-ai-os"
 version = "0.1.0"
-description = "A private founder and company AI operating assistant."
+description = "The shared private core for Youchen AI OS and EcoFixer AI OS."
 requires-python = ">=3.10"
 dependencies = [
   "streamlit>=1.52,<2",

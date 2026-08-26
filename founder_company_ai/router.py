@@ -7,6 +7,9 @@ import re
 from founder_company_ai.models import Intent, MemoryCategory, RiskLevel, Scope, Visibility
 
 
+PERSONAL_OS_NAME = "Youchen AI OS"
+COMPANY_OS_NAME = "EcoFixer AI OS"
+
 REMEMBER_PREFIXES = (
     "請幫我記住", "请帮我记住", "幫我記住", "帮我记住", "請記住", "请记住",
     "記住", "记住", "remember",
@@ -62,13 +65,31 @@ def _infer_category(content: str) -> MemoryCategory:
 
 def _extract_project(content: str) -> str | None:
     lowered = content.lower()
+
+    if any(token in lowered for token in (
+        "ecofixer ai os",
+        "ecofixer ai",
+        "公司 ai",
+        "公司ai",
+        "company ai",
+    )):
+        return COMPANY_OS_NAME
+
+    if any(token in lowered for token in (
+        "youchen ai os",
+        "youchen ai",
+        "founder + company ai",
+        "founder company ai",
+        "founder ai",
+        "ai agent",
+        "創辦人 ai",
+        "创办人 ai",
+    )):
+        return PERSONAL_OS_NAME
+
     if "ecofixer" in lowered or "易修繕" in content or "易修缮" in content:
         return "EcoFixer"
-    if any(token in lowered for token in (
-        "founder + company ai", "founder company ai", "founder ai", "company ai",
-        "ai agent", "公司 ai", "公司ai", "創辦人 ai", "创办人 ai",
-    )):
-        return "Founder + Company AI"
+
     match = re.search(
         r"(?:專案|项目|project)\s*[:：]?\s*([A-Za-z0-9][A-Za-z0-9 _+\-]{1,50})",
         content,

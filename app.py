@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Founder + Company AI Streamlit application."""
+"""Youchen AI OS Streamlit application with EcoFixer AI OS company context."""
 
 from __future__ import annotations
 
@@ -22,6 +22,10 @@ from founder_company_ai.providers.openai_provider import OpenAIProvider
 from founder_company_ai.router import CommandRouter
 from founder_company_ai.services.actions import ActionService
 from founder_company_ai.storage import SQLiteStore
+
+
+PERSONAL_OS_NAME = "Youchen AI OS"
+COMPANY_OS_NAME = "EcoFixer AI OS"
 
 
 @dataclass(slots=True)
@@ -47,8 +51,8 @@ def build_runtime() -> Runtime:
                 model=settings.openai_model,
                 transcribe_model=settings.transcribe_model,
             )
-        except Exception as exc:  # surfaced safely in Settings
-            provider_error = f"{type(exc).__name__}: {exc}"
+        except Exception as exc:
+            provider_error = type(exc).__name__
 
     assistant = FounderCompanyAssistant(
         store=store,
@@ -80,6 +84,19 @@ CSS = """
 .eyebrow {font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; opacity:.62;}
 .hero h1 {font-size:2.45rem; line-height:1.08; margin:.45rem 0 .65rem;}
 .muted {opacity:.67;}
+.identity-grid {
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:.8rem;
+    margin: .8rem 0 1.2rem;
+}
+.identity-card {
+    border:1px solid rgba(255,255,255,.08);
+    background:rgba(255,255,255,.025);
+    border-radius:18px;
+    padding:1rem 1.1rem;
+}
+.identity-title {font-weight:650; font-size:1rem; margin-bottom:.2rem;}
 .card {
     border: 1px solid rgba(255,255,255,.08);
     background: rgba(255,255,255,.025);
@@ -100,6 +117,9 @@ CSS = """
 .warn {border-color:rgba(250,204,21,.35); color:#fde047;}
 .risk {border-color:rgba(248,113,113,.35); color:#fca5a5;}
 .small {font-size:.82rem; opacity:.72;}
+@media (max-width: 760px) {
+    .identity-grid {grid-template-columns:1fr;}
+}
 </style>
 """
 
@@ -108,11 +128,11 @@ def safe(value: object) -> str:
     return html.escape(str(value))
 
 
-def page_header(title: str, subtitle: str) -> None:
+def page_header(title: str, subtitle: str, *, eyebrow: str = PERSONAL_OS_NAME) -> None:
     st.markdown(
         f"""
         <div class="hero">
-          <div class="eyebrow">Private AI Operating Assistant</div>
+          <div class="eyebrow">{safe(eyebrow)}</div>
           <h1>{safe(title)}</h1>
           <div class="muted">{safe(subtitle)}</div>
         </div>
@@ -121,11 +141,31 @@ def page_header(title: str, subtitle: str) -> None:
     )
 
 
+def render_identity_boundary() -> None:
+    st.markdown(
+        f"""
+        <div class="identity-grid">
+          <div class="identity-card">
+            <div class="identity-title">{PERSONAL_OS_NAME}</div>
+            <div class="small">私人控制中樞 · 創辦人專屬 · 可存取 founder-only 記憶</div>
+          </div>
+          <div class="identity-card">
+            <div class="identity-title">{COMPANY_OS_NAME}</div>
+            <div class="small">公司營運脈絡 · V1 僅限創辦人 · 不得取得私人記憶</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_home(runtime: Runtime) -> None:
     page_header(
-        "Founder + Company AI",
-        "一個入口，同時理解創辦人與公司；先安全地記住、整理、追蹤，再逐步連接真實工具。",
+        PERSONAL_OS_NAME,
+        f"你的私人 AI 控制中樞；公司工作由 {COMPANY_OS_NAME} 脈絡處理，兩者共用核心但資料邊界分開。",
     )
+    render_identity_boundary()
+
     counts = runtime.store.counts()
     provider_status = "AI 已連線" if runtime.provider else "本機安全模式"
     columns = st.columns(4)
@@ -140,7 +180,7 @@ def render_home(runtime: Runtime) -> None:
             "設定 API key 後才啟用生成式對話與語音轉錄。"
         )
     elif not runtime.settings.allow_cloud_memory_context:
-        st.success("AI 已連線，但長期記憶仍留在本機，不會自動送入模型。")
+        st.success("AI 已連線，但結構化長期記憶仍留在本機，不會自動送入模型。")
     else:
         st.warning("雲端記憶上下文已啟用。請只儲存你允許傳送給模型的內容。")
 
@@ -198,10 +238,11 @@ def _send_chat(runtime: Runtime, text: str) -> None:
 def render_chat(runtime: Runtime) -> None:
     page_header(
         "Chat",
-        "用自然語言交代目標；明確的記憶與待辦指令會先在本機安全執行。",
+        f"直接對 {PERSONAL_OS_NAME} 交代目標；涉及公司時自動使用 {COMPANY_OS_NAME} 脈絡。",
     )
     st.caption(
-        "直接指令：`記住：……`、`新增待辦：……`、`今天公司有什麼事情？`、`列出記憶`"
+        "直接指令：`記住：……`、`新增待辦：……`、`今天公司有什麼事情？`、"
+        "`列出記憶`、`列出待辦`"
     )
 
     messages = runtime.store.list_messages(
@@ -211,8 +252,9 @@ def render_chat(runtime: Runtime) -> None:
     if not messages:
         with st.chat_message("assistant"):
             st.markdown(
-                "我是你的 Founder + Company AI。你可以先告訴我一項公司規則、"
-                "一個產品決策，或今天需要完成的事情。"
+                f"我是 **{PERSONAL_OS_NAME}**。我會協助你的私人決策、行程與工作；"
+                f"處理公司事務時，我會進入 **{COMPANY_OS_NAME}** 脈絡，"
+                "但不會把 founder-only 記憶暴露到公司範圍。"
             )
     else:
         for message in messages:
@@ -223,9 +265,9 @@ def render_chat(runtime: Runtime) -> None:
         if runtime.provider is None:
             st.caption("語音錄製可用；語音轉錄需要設定 API key。")
         voice = st.audio_input(
-            "按下麥克風說話",
+            f"按下麥克風，對 {PERSONAL_OS_NAME} 說話",
             sample_rate=16000,
-            key="founder_voice",
+            key="youchen_voice",
         )
         voice_bytes = voice.getvalue() if voice is not None else b""
         voice_hash = hashlib.sha256(voice_bytes).hexdigest() if voice_bytes else None
@@ -244,17 +286,30 @@ def render_chat(runtime: Runtime) -> None:
                     audio_bytes=voice_bytes,
                     filename=getattr(voice, "name", "voice.wav"),
                 )
+                runtime.store.log_activity(
+                    action_type="voice.transcribed",
+                    summary="Transcribed and submitted a founder voice command.",
+                    risk_level=RiskLevel.READ_ONLY,
+                    details={"audio_sha256": voice_hash},
+                )
                 st.session_state.last_voice_hash = voice_hash
                 st.session_state.last_transcript = transcript
                 _send_chat(runtime, transcript)
                 st.rerun()
             except Exception as exc:
-                st.error(f"語音轉錄失敗：{type(exc).__name__}: {exc}")
+                runtime.store.log_activity(
+                    action_type="voice.transcription_failed",
+                    summary="Voice transcription failed.",
+                    risk_level=RiskLevel.READ_ONLY,
+                    status="failed",
+                    details={"error_type": type(exc).__name__},
+                )
+                st.error("語音轉錄目前無法完成。錄音內容未被當成已完成指令。")
 
         if st.session_state.get("last_transcript"):
             st.caption(f"上次語音：{st.session_state.last_transcript}")
 
-    prompt = st.chat_input("跟你的 AI 說話…")
+    prompt = st.chat_input(f"跟 {PERSONAL_OS_NAME} 說話…")
     if prompt:
         _send_chat(runtime, prompt)
         st.rerun()
@@ -263,10 +318,13 @@ def render_chat(runtime: Runtime) -> None:
 def render_memory(runtime: Runtime) -> None:
     page_header(
         "Memory",
-        "個人、公司與專案記憶分開保存，並明確標示可見範圍。",
+        f"{PERSONAL_OS_NAME} 私人記憶、{COMPANY_OS_NAME} 公司記憶與專案記憶分開保存。",
     )
     with st.form("add_memory", clear_on_submit=True):
-        content = st.text_area("內容", placeholder="例如：金額與抽成比例必須可調整，UI 先保留位置。")
+        content = st.text_area(
+            "內容",
+            placeholder="例如：金額與抽成比例必須可調整，UI 先保留位置。",
+        )
         c1, c2, c3 = st.columns(3)
         scope = c1.selectbox("範圍", list(Scope), format_func=lambda item: item.value)
         category = c2.selectbox(
@@ -324,10 +382,13 @@ def render_memory(runtime: Runtime) -> None:
 def render_tasks(runtime: Runtime) -> None:
     page_header(
         "Tasks",
-        "先把工作與責任看清楚；V1 只執行本機可逆操作。",
+        "整理私人與公司工作；V1 只執行本機可逆操作。",
     )
     with st.form("add_task", clear_on_submit=True):
-        title = st.text_input("待辦", placeholder="例如：完成權限模型與 founder-only memory 測試")
+        title = st.text_input(
+            "待辦",
+            placeholder="例如：完成 EcoFixer AI OS 權限模型測試",
+        )
         c1, c2, c3 = st.columns(3)
         scope = c1.selectbox("範圍", list(Scope), format_func=lambda item: item.value)
         priority = c2.selectbox("優先級", [1, 2, 3], index=1)
@@ -403,7 +464,7 @@ def render_tasks(runtime: Runtime) -> None:
 def render_activity(runtime: Runtime) -> None:
     page_header(
         "Activity",
-        "AI 與本機工具做過的事情都必須留下可追蹤紀錄。",
+        f"{PERSONAL_OS_NAME} 與 {COMPANY_OS_NAME} 做過的本機操作都必須留下可追蹤紀錄。",
     )
     activities = runtime.store.list_activity(limit=200)
     if not activities:
@@ -437,8 +498,18 @@ def render_activity(runtime: Runtime) -> None:
 def render_settings(runtime: Runtime) -> None:
     page_header(
         "Settings",
-        "模型可以更換；資料邊界、權限與稽核規則不能依賴模型自己決定。",
+        "模型可以更換；身份、資料邊界、權限與稽核規則不能交給模型自己決定。",
     )
+    st.subheader("Identity")
+    st.write(
+        {
+            "personal_os": PERSONAL_OS_NAME,
+            "company_os": COMPANY_OS_NAME,
+            "v1_access": "founder_only",
+            "shared_core": "founder_company_ai",
+        }
+    )
+
     st.subheader("AI Provider")
     st.write(
         {
@@ -446,7 +517,7 @@ def render_settings(runtime: Runtime) -> None:
             "model": runtime.settings.openai_model,
             "transcribe_model": runtime.settings.transcribe_model,
             "api_key": "configured" if runtime.settings.openai_api_key else "not configured",
-            "provider_error": runtime.provider_error,
+            "provider_error_type": runtime.provider_error,
         }
     )
 
@@ -482,7 +553,7 @@ def render_settings(runtime: Runtime) -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="Founder + Company AI",
+        page_title=PERSONAL_OS_NAME,
         page_icon="◆",
         layout="wide",
         initial_sidebar_state="expanded",
@@ -491,8 +562,12 @@ def main() -> None:
     runtime = build_runtime()
 
     with st.sidebar:
-        st.title("Founder AI")
-        st.caption("Private · Company-aware · Auditable")
+        st.title(PERSONAL_OS_NAME)
+        st.caption(f"Private control plane · {COMPANY_OS_NAME}")
+        st.markdown(
+            '<span class="badge safe">Founder-only V1</span>',
+            unsafe_allow_html=True,
+        )
         page = st.radio(
             "Navigation",
             ["Home", "Chat", "Memory", "Tasks", "Activity", "Settings"],

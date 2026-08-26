@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from founder_company_ai.assistant import FounderCompanyAssistant
+from founder_company_ai.assistant import BASE_IDENTITY, FounderCompanyAssistant
 from founder_company_ai.models import MemoryCategory
 from founder_company_ai.router import CommandRouter
 from founder_company_ai.services.actions import ActionService
@@ -31,10 +31,16 @@ def build_assistant(
     return assistant, store
 
 
+def test_canonical_product_identities_are_in_system_prompt() -> None:
+    assert "Youchen AI OS" in BASE_IDENTITY
+    assert "EcoFixer AI OS" in BASE_IDENTITY
+    assert "Founder + Company AI" not in BASE_IDENTITY
+
+
 def test_local_memory_command_is_executed(tmp_path: Path) -> None:
     assistant, store = build_assistant(tmp_path)
     reply = assistant.handle(
-        message="記住：公司 AI 不可以公開創辦人的私人記憶",
+        message="記住：EcoFixer AI OS 不可以公開創辦人的私人記憶",
         conversation_id="founder-main",
     )
 
@@ -52,6 +58,7 @@ def test_safe_mode_explains_provider_requirement(tmp_path: Path) -> None:
         conversation_id="founder-main",
     )
 
+    assert "Youchen AI OS" in reply
     assert "本機安全模式" in reply
     assert "OPENAI_API_KEY" in reply
 
@@ -59,7 +66,7 @@ def test_safe_mode_explains_provider_requirement(tmp_path: Path) -> None:
 def test_can_list_open_tasks_through_chat(tmp_path: Path) -> None:
     assistant, store = build_assistant(tmp_path)
     assistant.handle(
-        message="新增待辦：完成語音權限測試",
+        message="新增待辦：完成 EcoFixer AI OS 語音權限測試",
         conversation_id="founder-main",
     )
 
@@ -68,7 +75,7 @@ def test_can_list_open_tasks_through_chat(tmp_path: Path) -> None:
         conversation_id="founder-main",
     )
 
-    assert "完成語音權限測試" in reply
+    assert "完成 EcoFixer AI OS 語音權限測試" in reply
     assert any(
         activity.action_type == "task.listed"
         for activity in store.list_activity()
