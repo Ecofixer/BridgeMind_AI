@@ -1,4 +1,4 @@
-"""Typed domain models for memory, tasks, messages, and actions."""
+"""Typed domain models for context, memory, tasks, messages, and actions."""
 
 from __future__ import annotations
 
@@ -42,6 +42,24 @@ class RiskLevel(str, Enum):
     PROHIBITED = "prohibited"
 
 
+class ActionStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    BLOCKED = "blocked"
+
+
+@dataclass(frozen=True, slots=True)
+class ContextRecord:
+    id: str
+    domain: Scope
+    key: str
+    value: str
+    visibility: Visibility
+    created_at: str
+    updated_at: str
+
+
 @dataclass(frozen=True, slots=True)
 class MemoryRecord:
     id: str
@@ -73,7 +91,20 @@ class MessageRecord:
     conversation_id: str
     role: str
     content: str
+    cloud_allowed: bool
     created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class ActionRequestRecord:
+    id: str
+    title: str
+    description: str
+    risk_level: RiskLevel
+    status: ActionStatus
+    payload: dict[str, Any]
+    created_at: str
+    updated_at: str
 
 
 @dataclass(frozen=True, slots=True)
